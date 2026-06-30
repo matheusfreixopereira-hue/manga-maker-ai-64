@@ -95,13 +95,17 @@
   * {
     border-color: var(--color-border);
   }
-  html, body {
+  html,
+  body {
     background-color: var(--color-background);
     color: var(--color-foreground);
     font-family: var(--font-sans);
     -webkit-font-smoothing: antialiased;
   }
-  h1, h2, h3, .font-display {
+  h1,
+  h2,
+  h3,
+  .font-display {
     font-family: var(--font-display);
     letter-spacing: 0.01em;
   }
@@ -117,4 +121,22 @@
 @utility ink-border {
   border: 2px solid var(--color-ink);
   box-shadow: 4px 4px 0 0 var(--color-ink);
+}
+
+.hero-video-fade {
+  -webkit-mask-image:
+    linear-gradient(to right, transparent 0%, black 24%, black 100%),
+    linear-gradient(to bottom, transparent 0%, black 14%, black 86%, transparent 100%);
+  -webkit-mask-composite: source-in;
+  mask-image:
+    linear-gradient(to right, transparent 0%, black 24%, black 100%),
+    linear-gradient(to bottom, transparent 0%, black 14%, black 86%, transparent 100%);
+  mask-composite: intersect;
+}
+
+@media (max-width: 767px) {
+  .hero-video-fade {
+    -webkit-mask-image: linear-gradient(to bottom, black 0%, black 72%, transparent 100%);
+    mask-image: linear-gradient(to bottom, black 0%, black 72%, transparent 100%);
+  }
 }

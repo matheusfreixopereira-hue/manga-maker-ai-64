@@ -12,7 +12,7 @@ export const Route = createFileRoute("/_authenticated/projects/new")({
 const schema = z.object({
   title: z.string().trim().min(1, "Informe um título").max(120),
   description: z.string().trim().max(500).optional().or(z.literal("")),
-  creation_mode: z.enum(["idea", "pasted", "upload", "continuation"]),
+  creation_mode: z.enum(["idea", "pasted", "upload"]),
   initial_idea: z.string().trim().max(5000).optional().or(z.literal("")),
   genre: z.string().trim().max(80).optional().or(z.literal("")),
   tone: z.string().trim().max(80).optional().or(z.literal("")),
@@ -57,6 +57,17 @@ function NewProject() {
     try {
       const { data: userData } = await supabase.auth.getUser();
       if (!userData.user) throw new Error("Sessão inválida");
+
+      const { count, error: countError } = await supabase
+        .from("projects")
+        .select("id", { count: "exact", head: true })
+        .eq("user_id", userData.user.id)
+        .eq("archived", false);
+      if (countError) throw countError;
+      if ((count ?? 0) >= 3) {
+        throw new Error("Limite do MVP atingido: mantenha no máximo 3 projetos ativos.");
+      }
+
       const payload = {
         ...parsed.data,
         description: parsed.data.description || null,
@@ -66,11 +77,7 @@ function NewProject() {
         age_rating: parsed.data.age_rating || null,
         user_id: userData.user.id,
       };
-      const { data, error } = await supabase
-        .from("projects")
-        .insert(payload)
-        .select("id")
-        .single();
+      const { data, error } = await supabase.from("projects").insert(payload).select("id").single();
       if (error) throw error;
       toast.success("Projeto criado!");
       navigate({ to: "/projects/$projectId", params: { projectId: data.id } });
@@ -116,18 +123,22 @@ function NewProject() {
               { v: "idea", t: "A partir de uma ideia", d: "Eu descrevo brevemente." },
               { v: "pasted", t: "Colar história/roteiro", d: "Já tenho texto pronto." },
               { v: "upload", t: "Enviar PDF/DOCX/TXT", d: "Tenho um documento." },
-              { v: "continuation", t: "Continuar obra existente", d: "Avançado." },
+              { v: "continuation", t: "Continuar obra existente", d: "Depois do MVP." },
             ].map((o) => (
               <label
                 key={o.v}
-                className={`cursor-pointer border-2 p-3 ${form.creation_mode === o.v ? "border-accent bg-accent/10" : "border-ink bg-background"}`}
+                className={`border-2 p-3 ${o.v === "continuation" ? "cursor-not-allowed border-ink bg-muted opacity-60" : form.creation_mode === o.v ? "cursor-pointer border-accent bg-accent/10" : "cursor-pointer border-ink bg-background"}`}
               >
                 <input
                   type="radio"
                   name="creation_mode"
                   value={o.v}
                   checked={form.creation_mode === o.v}
-                  onChange={() => update("creation_mode", o.v as typeof form.creation_mode)}
+                  disabled={o.v === "continuation"}
+                  onChange={() => {
+                    if (o.v !== "continuation")
+                      update("creation_mode", o.v as typeof form.creation_mode);
+                  }}
                   className="sr-only"
                 />
                 <div className="font-display text-lg">{o.t}</div>
@@ -157,8 +168,24 @@ function NewProject() {
               className="w-full border-2 border-ink bg-background px-3 py-2"
             >
               <option value="">Selecione...</option>
-              {["Shonen","Shojo","Seinen","Josei","Ação","Aventura","Fantasia","Terror","Romance","Drama","Ficção Científica","Comédia","Esportivo"].map((g) => (
-                <option key={g} value={g}>{g}</option>
+              {[
+                "Shonen",
+                "Shojo",
+                "Seinen",
+                "Josei",
+                "Ação",
+                "Aventura",
+                "Fantasia",
+                "Terror",
+                "Romance",
+                "Drama",
+                "Ficção Científica",
+                "Comédia",
+                "Esportivo",
+              ].map((g) => (
+                <option key={g} value={g}>
+                  {g}
+                </option>
               ))}
             </select>
           </Field>
@@ -169,8 +196,19 @@ function NewProject() {
               className="w-full border-2 border-ink bg-background px-3 py-2"
             >
               <option value="">Selecione...</option>
-              {["Sério","Sombrio","Leve","Dramático","Cômico","Épico","Melancólico","Tenso"].map((g) => (
-                <option key={g} value={g}>{g}</option>
+              {[
+                "Sério",
+                "Sombrio",
+                "Leve",
+                "Dramático",
+                "Cômico",
+                "Épico",
+                "Melancólico",
+                "Tenso",
+              ].map((g) => (
+                <option key={g} value={g}>
+                  {g}
+                </option>
               ))}
             </select>
           </Field>
@@ -245,8 +283,10 @@ function NewProject() {
               onChange={(e) => update("age_rating", e.target.value)}
               className="w-full border-2 border-ink bg-background px-3 py-2"
             >
-              {["Livre","10","12","14","16","18"].map((g) => (
-                <option key={g} value={g}>{g}</option>
+              {["Livre", "10", "12", "14", "16", "18"].map((g) => (
+                <option key={g} value={g}>
+                  {g}
+                </option>
               ))}
             </select>
           </Field>
@@ -260,11 +300,13 @@ function NewProject() {
               className="w-full border-2 border-ink bg-background px-3 py-2"
             >
               <option value="pt-BR">Português</option>
-              <option value="en">Inglês</option>
-              <option value="es">Espanhol</option>
-              <option value="ja">Japonês</option>
             </select>
           </Field>
+        </div>
+
+        <div className="border-2 border-ink/20 bg-muted px-3 py-2 text-xs text-muted-foreground">
+          MVP: até 3 projetos ativos, 1 capítulo por vez, até 20 páginas e 3 regenerações por
+          quadro.
         </div>
 
         <div className="flex justify-end gap-3 pt-4">
@@ -288,7 +330,15 @@ function NewProject() {
   );
 }
 
-function Field({ label, required, children }: { label: string; required?: boolean; children: React.ReactNode }) {
+function Field({
+  label,
+  required,
+  children,
+}: {
+  label: string;
+  required?: boolean;
+  children: React.ReactNode;
+}) {
   return (
     <div>
       <label className="mb-1 block text-sm font-semibold">

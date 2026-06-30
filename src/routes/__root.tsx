@@ -78,21 +78,44 @@ export const Route = createRootRouteWithContext<{ queryClient: QueryClient }>()(
       { charSet: "utf-8" },
       { name: "viewport", content: "width=device-width, initial-scale=1" },
       { title: "Tinta — Crie mangás com inteligência artificial" },
-      { name: "description", content: "Transforme uma ideia, roteiro ou documento em um mangá completo. Personagens consistentes, storyboard, páginas e PDF pronto para publicar." },
+      {
+        name: "description",
+        content:
+          "Transforme uma ideia, roteiro ou documento em um mangá completo. Personagens consistentes, storyboard, páginas e PDF pronto para publicar.",
+      },
       { property: "og:title", content: "Tinta — Crie mangás com inteligência artificial" },
-      { property: "og:description", content: "Transforme uma ideia, roteiro ou documento em um mangá completo. Personagens consistentes, storyboard, páginas e PDF pronto para publicar." },
+      {
+        property: "og:description",
+        content:
+          "Transforme uma ideia, roteiro ou documento em um mangá completo. Personagens consistentes, storyboard, páginas e PDF pronto para publicar.",
+      },
       { property: "og:type", content: "website" },
       { name: "twitter:card", content: "summary_large_image" },
       { name: "twitter:title", content: "Tinta — Crie mangás com inteligência artificial" },
-      { name: "twitter:description", content: "Transforme uma ideia, roteiro ou documento em um mangá completo. Personagens consistentes, storyboard, páginas e PDF pronto para publicar." },
-      { property: "og:image", content: "https://pub-bb2e103a32db4e198524a2e9ed8f35b4.r2.dev/c8e24932-a8f9-4536-857c-d221d989ade4/id-preview-bb1c507d--ced07556-c535-41b3-803a-6fcaf686fa4e.lovable.app-1782849980342.png" },
-      { name: "twitter:image", content: "https://pub-bb2e103a32db4e198524a2e9ed8f35b4.r2.dev/c8e24932-a8f9-4536-857c-d221d989ade4/id-preview-bb1c507d--ced07556-c535-41b3-803a-6fcaf686fa4e.lovable.app-1782849980342.png" },
+      {
+        name: "twitter:description",
+        content:
+          "Transforme uma ideia, roteiro ou documento em um mangá completo. Personagens consistentes, storyboard, páginas e PDF pronto para publicar.",
+      },
+      {
+        property: "og:image",
+        content:
+          "https://pub-bb2e103a32db4e198524a2e9ed8f35b4.r2.dev/c8e24932-a8f9-4536-857c-d221d989ade4/id-preview-bb1c507d--ced07556-c535-41b3-803a-6fcaf686fa4e.lovable.app-1782849980342.png",
+      },
+      {
+        name: "twitter:image",
+        content:
+          "https://pub-bb2e103a32db4e198524a2e9ed8f35b4.r2.dev/c8e24932-a8f9-4536-857c-d221d989ade4/id-preview-bb1c507d--ced07556-c535-41b3-803a-6fcaf686fa4e.lovable.app-1782849980342.png",
+      },
     ],
     links: [
       { rel: "stylesheet", href: appCss },
       { rel: "preconnect", href: "https://fonts.googleapis.com" },
       { rel: "preconnect", href: "https://fonts.gstatic.com", crossOrigin: "anonymous" },
-      { rel: "stylesheet", href: "https://fonts.googleapis.com/css2?family=Bebas+Neue&family=Inter:wght@400;500;600;700&display=swap" },
+      {
+        rel: "stylesheet",
+        href: "https://fonts.googleapis.com/css2?family=Bebas+Neue&family=Inter:wght@400;500;600;700&display=swap",
+      },
     ],
   }),
   shellComponent: RootShell,
@@ -103,7 +126,7 @@ export const Route = createRootRouteWithContext<{ queryClient: QueryClient }>()(
 
 function RootShell({ children }: { children: ReactNode }) {
   return (
-    <html lang="en">
+    <html lang="pt-BR">
       <head>
         <HeadContent />
       </head>
