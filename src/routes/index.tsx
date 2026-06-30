@@ -71,7 +71,7 @@ function Landing() {
               </a>
             </div>
           </div>
-          <div className="hero-video-fade pointer-events-none relative min-h-[360px] overflow-hidden md:absolute md:inset-y-0 md:right-0 md:w-[58%]">
+          <div className="hero-video-fade pointer-events-none relative min-h-[360px] overflow-hidden md:absolute md:inset-y-0 md:right-[-12vw] md:w-[58%]">
             <video
               className="h-full min-h-[360px] w-full object-cover md:min-h-full"
               src="/manga-hero-bg.mp4"
