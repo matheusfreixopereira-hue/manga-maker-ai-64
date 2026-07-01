@@ -151,7 +151,6 @@ async function createProjectBible(request: Request, env: unknown, projectId: str
     body: JSON.stringify({
       model,
       input: buildBiblePrompt(project),
-      temperature: 0.6,
     }),
   });
 
@@ -297,7 +296,6 @@ async function createProjectCharacters(request: Request, env: unknown, projectId
     body: JSON.stringify({
       model,
       input: buildCharactersPrompt(project, bibleRow.content),
-      temperature: 0.7,
     }),
   });
 
@@ -476,7 +474,6 @@ async function createProjectScript(request: Request, env: unknown, projectId: st
     body: JSON.stringify({
       model,
       input: buildScriptPrompt(project, bibleRow.content, (characters ?? []) as CharacterForScript[]),
-      temperature: 0.7,
     }),
   });
 
@@ -725,7 +722,6 @@ async function createProjectStoryboard(request: Request, env: unknown, projectId
     body: JSON.stringify({
       model,
       input: buildStoryboardPrompt(project, chapter.script, locks),
-      temperature: 0.6,
     }),
   });
 
