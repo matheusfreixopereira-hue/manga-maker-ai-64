@@ -870,6 +870,8 @@ async function generatePanelImage(
   const supabaseKey = readEnv(env, "SUPABASE_PUBLISHABLE_KEY");
   const openaiKey = readEnv(env, "OPENAI_API_KEY");
   const imageModel = readEnv(env, "OPENAI_IMAGE_MODEL") ?? "gpt-image-1";
+  // Qualidade economica por padrao (low). Suba via env OPENAI_IMAGE_QUALITY=medium|high.
+  const imageQuality = readEnv(env, "OPENAI_IMAGE_QUALITY") ?? "low";
   const token = extractBearerToken(request);
 
   if (!supabaseUrl || !supabaseKey) return json({ error: "Supabase nao configurado" }, 500);
@@ -900,7 +902,7 @@ async function generatePanelImage(
   const imageResponse = await fetch("https://api.openai.com/v1/images/generations", {
     method: "POST",
     headers: { authorization: `Bearer ${openaiKey}`, "content-type": "application/json" },
-    body: JSON.stringify({ model: imageModel, prompt, size, n: 1 }),
+    body: JSON.stringify({ model: imageModel, prompt, size, n: 1, quality: imageQuality }),
   });
 
   const imagePayload = (await imageResponse.json().catch(() => null)) as {
