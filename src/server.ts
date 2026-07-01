@@ -200,6 +200,162 @@ async function createProjectBible(request: Request, env: unknown, projectId: str
   return json({ bible });
 }
 
+type GeneratedCharacter = {
+  name?: string;
+  role?: string;
+  age?: string;
+  personality?: string;
+  objective?: string;
+  conflict?: string;
+  appearance?: string;
+  visual_lock?: Record<string, unknown>;
+};
+
+function buildCharactersPrompt(project: ProjectForBible, bible: Json) {
+  return [
+    "Voce e um character designer senior de mangas trabalhando em um MVP em portugues do Brasil.",
+    "A partir da Biblia da Obra abaixo, extraia e detalhe o elenco do capitulo 1 (protagonista, antagonista e coadjuvantes relevantes).",
+    "Responda SOMENTE com JSON valido, sem markdown, no formato: { \"personagens\": [ ... ] }.",
+    "Cada personagem deve ter os campos abaixo. O campo visual_lock e o 'Character Lock': descritores canonicos e invariaveis reutilizados em todas as paginas para manter consistencia visual.",
+    JSON.stringify({
+      personagens: [
+        {
+          name: "string",
+          role: "protagonista | antagonista | coadjuvante",
+          age: "string",
+          personality: "string",
+          objective: "string",
+          conflict: "string",
+          appearance: "descricao fisica completa em 2-3 frases",
+          visual_lock: {
+            cabelo: "string",
+            olhos: "string",
+            roupa_padrao: "string",
+            marcas_ou_acessorios: "string",
+            paleta: "string",
+            traco_distintivo: "string",
+          },
+        },
+      ],
+    }),
+    "",
+    "Gere entre 2 e 6 personagens, priorizando os essenciais para o capitulo 1.",
+    "Direcao visual do projeto: color_mode=" + project.color_mode + ".",
+    "",
+    "Biblia da Obra:",
+    JSON.stringify(bible),
+  ].join("\n");
+}
+
+async function createProjectCharacters(request: Request, env: unknown, projectId: string) {
+  if (request.method !== "POST") return json({ error: "Metodo nao permitido" }, 405);
+
+  const supabaseUrl = readEnv(env, "SUPABASE_URL");
+  const supabaseKey = readEnv(env, "SUPABASE_PUBLISHABLE_KEY");
+  const openaiKey = readEnv(env, "OPENAI_API_KEY");
+  const model = readEnv(env, "OPENAI_MODEL") ?? "gpt-5.5";
+  const token = extractBearerToken(request);
+
+  if (!supabaseUrl || !supabaseKey) return json({ error: "Supabase nao configurado" }, 500);
+  if (!openaiKey) return json({ error: "OPENAI_API_KEY nao configurada" }, 500);
+  if (!token) return json({ error: "Sessao ausente" }, 401);
+
+  const supabase = createClient<Database>(supabaseUrl, supabaseKey, {
+    global: { headers: { Authorization: `Bearer ${token}` } },
+    auth: { persistSession: false, autoRefreshToken: false },
+  });
+
+  const { data: userData, error: userError } = await supabase.auth.getUser(token);
+  if (userError || !userData.user) return json({ error: "Sessao invalida" }, 401);
+
+  const { data: project, error: projectError } = await supabase
+    .from("projects")
+    .select(
+      "id,user_id,title,description,creation_mode,initial_idea,genre,tone,age_rating,color_mode,reading_direction,page_format,dialogue_language",
+    )
+    .eq("id", projectId)
+    .eq("user_id", userData.user.id)
+    .maybeSingle();
+
+  if (projectError) return json({ error: projectError.message }, 500);
+  if (!project) return json({ error: "Projeto nao encontrado" }, 404);
+
+  const { data: bibleRow } = await supabase
+    .from("project_bibles")
+    .select("content")
+    .eq("project_id", project.id)
+    .maybeSingle();
+
+  if (!bibleRow) return json({ error: "Gere a Biblia da Obra antes dos personagens." }, 400);
+
+  const openaiResponse = await fetch("https://api.openai.com/v1/responses", {
+    method: "POST",
+    headers: {
+      authorization: `Bearer ${openaiKey}`,
+      "content-type": "application/json",
+    },
+    body: JSON.stringify({
+      model,
+      input: buildCharactersPrompt(project, bibleRow.content),
+      temperature: 0.7,
+    }),
+  });
+
+  const openaiPayload = await openaiResponse.json().catch(() => null);
+  if (!openaiResponse.ok) {
+    const message =
+      openaiPayload && typeof openaiPayload === "object" && "error" in openaiPayload
+        ? JSON.stringify((openaiPayload as { error: unknown }).error)
+        : "Erro ao chamar OpenAI";
+    return json({ error: message }, 502);
+  }
+
+  const text = extractOpenAIText(openaiPayload);
+  let list: GeneratedCharacter[] = [];
+  try {
+    const parsed = JSON.parse(text) as { personagens?: GeneratedCharacter[] } | GeneratedCharacter[];
+    list = Array.isArray(parsed) ? parsed : (parsed.personagens ?? []);
+  } catch {
+    return json({ error: "A IA nao retornou personagens em JSON valido. Tente novamente." }, 502);
+  }
+
+  const rows = list
+    .filter((c) => c && typeof c.name === "string" && c.name.trim().length > 0)
+    .map((c, index) => ({
+      project_id: project.id,
+      user_id: userData.user.id,
+      name: c.name!.trim(),
+      role: c.role ?? null,
+      age: c.age ?? null,
+      personality: c.personality ?? null,
+      objective: c.objective ?? null,
+      conflict: c.conflict ?? null,
+      appearance: c.appearance ?? null,
+      visual_lock: (c.visual_lock ?? {}) as Json,
+      sort_order: index,
+    }));
+
+  if (rows.length === 0) return json({ error: "Nenhum personagem foi gerado. Tente novamente." }, 502);
+
+  // Regeneration replaces the previous cast for this project.
+  await supabase.from("characters").delete().eq("project_id", project.id);
+
+  const { data: characters, error: insertError } = await supabase
+    .from("characters")
+    .insert(rows)
+    .select("*")
+    .order("sort_order", { ascending: true });
+
+  if (insertError) return json({ error: insertError.message }, 500);
+
+  await supabase
+    .from("projects")
+    .update({ status: "creating_characters", current_step: "characters" })
+    .eq("id", project.id);
+
+  return json({ characters });
+}
+
 async function getServerEntry(): Promise<ServerEntry> {
   if (!serverEntryPromise) {
     serverEntryPromise = import("@tanstack/react-start/server-entry").then(
@@ -235,6 +391,13 @@ export default {
       const generateBibleMatch = url.pathname.match(/^\/api\/projects\/([^/]+)\/generate-bible$/);
       if (generateBibleMatch) {
         return await createProjectBible(request, env, generateBibleMatch[1]);
+      }
+
+      const generateCharactersMatch = url.pathname.match(
+        /^\/api\/projects\/([^/]+)\/generate-characters$/,
+      );
+      if (generateCharactersMatch) {
+        return await createProjectCharacters(request, env, generateCharactersMatch[1]);
       }
 
       const handler = await getServerEntry();

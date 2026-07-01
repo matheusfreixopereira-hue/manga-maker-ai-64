@@ -8,6 +8,71 @@ export type Database = {
   };
   public: {
     Tables: {
+      characters: {
+        Row: {
+          age: string | null;
+          appearance: string | null;
+          approved: boolean;
+          conflict: string | null;
+          created_at: string;
+          id: string;
+          name: string;
+          objective: string | null;
+          personality: string | null;
+          project_id: string;
+          reference_url: string | null;
+          role: string | null;
+          sort_order: number;
+          updated_at: string;
+          user_id: string;
+          visual_lock: Json;
+        };
+        Insert: {
+          age?: string | null;
+          appearance?: string | null;
+          approved?: boolean;
+          conflict?: string | null;
+          created_at?: string;
+          id?: string;
+          name: string;
+          objective?: string | null;
+          personality?: string | null;
+          project_id: string;
+          reference_url?: string | null;
+          role?: string | null;
+          sort_order?: number;
+          updated_at?: string;
+          user_id: string;
+          visual_lock?: Json;
+        };
+        Update: {
+          age?: string | null;
+          appearance?: string | null;
+          approved?: boolean;
+          conflict?: string | null;
+          created_at?: string;
+          id?: string;
+          name?: string;
+          objective?: string | null;
+          personality?: string | null;
+          project_id?: string;
+          reference_url?: string | null;
+          role?: string | null;
+          sort_order?: number;
+          updated_at?: string;
+          user_id?: string;
+          visual_lock?: Json;
+        };
+        Relationships: [
+          {
+            foreignKeyName: "characters_project_id_fkey";
+            columns: ["project_id"];
+            isOneToOne: false;
+            referencedRelation: "projects";
+            referencedColumns: ["id"];
+          },
+        ];
+      };
       project_bibles: {
         Row: {
           content: Json;
