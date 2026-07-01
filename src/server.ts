@@ -625,6 +625,7 @@ function buildPanelImagePrompt(
     present ? `PERSONAGENS (mantenha identidade EXATA):\n${present}` : "",
     panel.scene_description ? `CENA: ${panel.scene_description}.` : "",
     "ESTILO VISUAL: composicao dramatica de manga, linhas de movimento quando fizer sentido.",
+    "COMPOSICAO: deixe area VAZIA (ceu, parede, fundo neutro) no topo e/ou nos cantos superiores para encaixar baloes de fala depois. NAO coloque rostos colados no topo do quadro; posicione o(s) personagem(ns) mais para o centro/baixo, deixando respiro no topo.",
     "NAO ALTERAR: cabelo, olhos, roupas, cicatrizes, idade, proporcoes ou lado de ferimentos dos personagens.",
     "SEM TEXTOS, SEM BALOES E SEM LETRAS NA IMAGEM.",
   ]
@@ -896,7 +897,11 @@ async function generatePanelImage(
   if (panelError) return json({ error: panelError.message }, 500);
   if (!panel) return json({ error: "Quadro nao encontrado" }, 404);
 
-  const prompt = panel.prompt ?? "Quadro de manga em preto e branco, sem textos.";
+  const basePrompt = panel.prompt ?? "Quadro de manga em preto e branco, sem textos.";
+  // Reforca (mesmo para quadros criados antes) que deve sobrar espaco vazio para os baloes.
+  const prompt =
+    basePrompt +
+    "\nDEIXE ESPACO VAZIO no topo e nos cantos superiores para baloes; nao tape o rosto; sem textos ou baloes na imagem.";
   const size = pickImageSize(panel.geometry);
 
   const imageResponse = await fetch("https://api.openai.com/v1/images/generations", {

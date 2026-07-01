@@ -226,23 +226,24 @@ function PageView({ page, onRegen }: { page: Page; onRegen?: (panelId: string) =
               </div>
             )}
 
-            {/* Balões: elementos independentes da imagem, editáveis antes de exportar */}
-            <div className="pointer-events-none absolute inset-0 flex flex-col items-center gap-1 p-1.5">
+            {/* Balões: ficam no topo, alternando os cantos (estilo mangá), nunca sobre
+                o centro/rosto. Narração vai no topo em caixa retangular. Editáveis. */}
+            <div className="pointer-events-none absolute inset-x-0 top-0 flex flex-col gap-1 p-1.5">
               {(panel.dialogues ?? []).map((d, di) => {
                 const tipo = (d.tipo ?? "dialogo").toLowerCase();
                 const extra = BALLOON_STYLE[tipo] ?? "rounded-2xl";
+                const isNarration = tipo === "narracao";
+                // Diálogos alternam canto direito/esquerdo (leitura mangá); narração fica à esquerda.
+                const side = isNarration ? "self-start" : di % 2 === 0 ? "self-end" : "self-start";
+                const width = isNarration ? "max-w-[80%]" : "max-w-[56%]";
                 return (
                   <div
                     key={di}
                     contentEditable
                     suppressContentEditableWarning
-                    className={`pointer-events-auto max-w-[92%] border-2 border-ink bg-paper px-2 py-0.5 text-center text-[10px] leading-tight text-ink shadow-sm outline-none ${extra}`}
+                    className={`pointer-events-auto ${side} ${width} border-2 border-ink bg-paper px-2 py-0.5 text-center text-[10px] leading-tight text-ink shadow-sm outline-none ${extra}`}
                   >
-                    {tipo === "narracao" && d.texto
-                      ? d.texto
-                      : d.personagem && tipo === "dialogo"
-                        ? d.texto
-                        : d.texto}
+                    {d.texto}
                   </div>
                 );
               })}
