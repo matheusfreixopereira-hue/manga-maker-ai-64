@@ -2,6 +2,7 @@ import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { useState } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { toast } from "sonner";
+import { Upload } from "lucide-react";
 import { z } from "zod";
 
 export const Route = createFileRoute("/_authenticated/projects/new")({
@@ -13,7 +14,7 @@ const schema = z.object({
   title: z.string().trim().min(1, "Informe um título").max(120),
   description: z.string().trim().max(500).optional().or(z.literal("")),
   creation_mode: z.enum(["idea", "pasted", "upload"]),
-  initial_idea: z.string().trim().max(5000).optional().or(z.literal("")),
+  initial_idea: z.string().trim().max(300000).optional().or(z.literal("")),
   genre: z.string().trim().max(80).optional().or(z.literal("")),
   tone: z.string().trim().max(80).optional().or(z.literal("")),
   age_rating: z.string().trim().max(20).optional().or(z.literal("")),
@@ -27,10 +28,13 @@ const schema = z.object({
 function NewProject() {
   const navigate = useNavigate();
   const [loading, setLoading] = useState(false);
+  const [extracting, setExtracting] = useState(false);
+  const [uploadFileName, setUploadFileName] = useState<string | null>(null);
+  const [extractError, setExtractError] = useState<string | null>(null);
   const [form, setForm] = useState({
     title: "",
     description: "",
-    creation_mode: "idea" as const,
+    creation_mode: "idea" as "idea" | "pasted" | "upload",
     initial_idea: "",
     genre: "",
     tone: "",
@@ -46,11 +50,45 @@ function NewProject() {
     setForm((f) => ({ ...f, [k]: v }));
   }
 
+  async function handleFile(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    e.target.value = "";
+    if (!file) return;
+    setExtractError(null);
+    setUploadFileName(file.name);
+    setExtracting(true);
+    try {
+      if (file.size > 25 * 1024 * 1024) throw new Error("Arquivo muito grande (máx. 25 MB).");
+      const { extractTextFromFile } = await import("@/lib/extract-text");
+      const text = await extractTextFromFile(file);
+      if (!text.trim()) {
+        throw new Error("Não consegui extrair texto desse arquivo. Cole o texto manualmente.");
+      }
+      update("initial_idea", text.slice(0, 300000));
+    } catch (err) {
+      setExtractError(err instanceof Error ? err.message : "Erro ao ler o arquivo.");
+      update("initial_idea", "");
+    } finally {
+      setExtracting(false);
+    }
+  }
+
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     const parsed = schema.safeParse(form);
     if (!parsed.success) {
       toast.error(parsed.error.issues[0]?.message ?? "Dados inválidos");
+      return;
+    }
+    if (
+      (form.creation_mode === "pasted" || form.creation_mode === "upload") &&
+      !form.initial_idea.trim()
+    ) {
+      toast.error(
+        form.creation_mode === "pasted"
+          ? "Cole o texto da sua história."
+          : "Envie um arquivo com o texto da história.",
+      );
       return;
     }
     setLoading(true);
@@ -153,10 +191,69 @@ function NewProject() {
             <textarea
               value={form.initial_idea}
               onChange={(e) => update("initial_idea", e.target.value)}
-              rows={5}
+              rows={6}
               placeholder="Ex.: Um jovem descobre que enxerga criaturas invisíveis que se alimentam de memórias humanas..."
               className="w-full border-2 border-ink bg-background px-3 py-2"
             />
+          </Field>
+        )}
+
+        {form.creation_mode === "pasted" && (
+          <Field label="Cole sua história ou roteiro completo">
+            <textarea
+              value={form.initial_idea}
+              onChange={(e) => update("initial_idea", e.target.value)}
+              rows={18}
+              placeholder="Cole aqui o texto completo — pode ser longo. A IA vai analisar e transformar em mangá."
+              className="w-full resize-y border-2 border-ink bg-background px-3 py-2 text-sm leading-relaxed"
+            />
+            <div className="mt-1 text-right text-xs text-muted-foreground">
+              {form.initial_idea.length.toLocaleString("pt-BR")} caracteres
+            </div>
+          </Field>
+        )}
+
+        {form.creation_mode === "upload" && (
+          <Field label="Envie seu documento">
+            <label
+              className={`flex flex-col items-center justify-center gap-2 border-2 border-dashed border-ink bg-background p-8 text-center ${extracting ? "opacity-60" : "cursor-pointer hover:bg-muted"}`}
+            >
+              <Upload className="h-8 w-8 text-accent" />
+              <span className="font-display text-lg">
+                {extracting ? "Lendo arquivo..." : "Clique para escolher um arquivo"}
+              </span>
+              <span className="text-xs text-muted-foreground">
+                PDF, DOCX, TXT, MD ou RTF — até 25 MB
+              </span>
+              <input
+                type="file"
+                accept=".pdf,.docx,.txt,.md,.markdown,.rtf,.csv"
+                className="hidden"
+                onChange={handleFile}
+                disabled={extracting}
+              />
+            </label>
+
+            {uploadFileName && !extractError && form.initial_idea && (
+              <div className="mt-2 text-xs text-muted-foreground">
+                <strong>{uploadFileName}</strong> —{" "}
+                {form.initial_idea.length.toLocaleString("pt-BR")} caracteres extraídos. Revise
+                abaixo se quiser.
+              </div>
+            )}
+            {extractError && (
+              <div className="mt-2 border-2 border-accent bg-accent/10 p-3 text-sm text-accent">
+                {extractError}
+              </div>
+            )}
+            {form.initial_idea && (
+              <textarea
+                value={form.initial_idea}
+                onChange={(e) => update("initial_idea", e.target.value)}
+                rows={12}
+                className="mt-3 w-full resize-y border-2 border-ink bg-background px-3 py-2 text-sm leading-relaxed"
+              />
+            )}
           </Field>
         )}
 

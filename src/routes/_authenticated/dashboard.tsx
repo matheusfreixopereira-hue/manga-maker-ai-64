@@ -1,7 +1,8 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { useEffect, useState } from "react";
 import { supabase } from "@/integrations/supabase/client";
-import { Plus, BookOpen } from "lucide-react";
+import { toast } from "sonner";
+import { Plus, BookOpen, Trash2 } from "lucide-react";
 
 export const Route = createFileRoute("/_authenticated/dashboard")({
   head: () => ({ meta: [{ title: "Meus mangás — Tinta" }] }),
@@ -34,6 +35,8 @@ const STATUS_LABEL: Record<string, string> = {
 
 function Dashboard() {
   const [projects, setProjects] = useState<Project[] | null>(null);
+  const [confirmId, setConfirmId] = useState<string | null>(null);
+  const [deletingId, setDeletingId] = useState<string | null>(null);
 
   useEffect(() => {
     supabase
@@ -43,6 +46,19 @@ function Dashboard() {
       .order("updated_at", { ascending: false })
       .then(({ data }) => setProjects((data as Project[]) ?? []));
   }, []);
+
+  async function deleteProject(id: string) {
+    setDeletingId(id);
+    const { error } = await supabase.from("projects").delete().eq("id", id);
+    setDeletingId(null);
+    setConfirmId(null);
+    if (error) {
+      toast.error(error.message);
+      return;
+    }
+    setProjects((ps) => (ps ?? []).filter((p) => p.id !== id));
+    toast.success("Projeto excluído.");
+  }
 
   return (
     <div className="mx-auto max-w-7xl px-6 py-10">
@@ -76,29 +92,61 @@ function Dashboard() {
       ) : (
         <div className="mt-8 grid gap-5 sm:grid-cols-2 lg:grid-cols-3">
           {projects.map((p) => (
-            <Link
-              key={p.id}
-              to="/projects/$projectId"
-              params={{ projectId: p.id }}
-              className="ink-border group block bg-card transition hover:-translate-y-0.5"
-            >
-              <div className="screentone aspect-[3/4] bg-muted">
-                {p.cover_url && (
-                  <img src={p.cover_url} alt={p.title} className="h-full w-full object-cover" />
+            <div key={p.id} className="ink-border group relative bg-card transition hover:-translate-y-0.5">
+              <div className="absolute right-2 top-2 z-10">
+                {confirmId === p.id ? (
+                  <div className="flex gap-1">
+                    <button
+                      type="button"
+                      onClick={() => deleteProject(p.id)}
+                      disabled={deletingId === p.id}
+                      className="border-2 border-ink bg-accent px-2 py-1 text-[11px] font-semibold uppercase tracking-wider text-accent-foreground disabled:opacity-50"
+                    >
+                      {deletingId === p.id ? "..." : "Excluir"}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setConfirmId(null)}
+                      className="border-2 border-ink bg-paper px-2 py-1 text-[11px] font-semibold uppercase tracking-wider"
+                    >
+                      Não
+                    </button>
+                  </div>
+                ) : (
+                  <button
+                    type="button"
+                    onClick={() => setConfirmId(p.id)}
+                    title="Excluir projeto"
+                    className="border-2 border-ink bg-paper/90 p-1.5 opacity-0 transition group-hover:opacity-100 hover:bg-accent hover:text-accent-foreground"
+                  >
+                    <Trash2 className="h-4 w-4" />
+                  </button>
                 )}
               </div>
-              <div className="border-t-2 border-ink p-4">
-                <div className="flex items-center justify-between gap-2">
-                  <h3 className="truncate font-display text-xl">{p.title}</h3>
-                  <span className="shrink-0 bg-ink px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wider text-paper">
-                    {p.color_mode.startsWith("bw") ? "P&B" : "COR"}
-                  </span>
+
+              <Link
+                to="/projects/$projectId"
+                params={{ projectId: p.id }}
+                className="block"
+              >
+                <div className="screentone aspect-[3/4] bg-muted">
+                  {p.cover_url && (
+                    <img src={p.cover_url} alt={p.title} className="h-full w-full object-cover" />
+                  )}
                 </div>
-                <p className="mt-1 text-xs text-muted-foreground">
-                  {STATUS_LABEL[p.status] ?? p.status} • {p.reading_direction === "rtl" ? "Direita → Esquerda" : "Esquerda → Direita"}
-                </p>
-              </div>
-            </Link>
+                <div className="border-t-2 border-ink p-4">
+                  <div className="flex items-center justify-between gap-2">
+                    <h3 className="truncate font-display text-xl">{p.title}</h3>
+                    <span className="shrink-0 bg-ink px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wider text-paper">
+                      {p.color_mode.startsWith("bw") ? "P&B" : "COR"}
+                    </span>
+                  </div>
+                  <p className="mt-1 text-xs text-muted-foreground">
+                    {STATUS_LABEL[p.status] ?? p.status} • {p.reading_direction === "rtl" ? "Direita → Esquerda" : "Esquerda → Direita"}
+                  </p>
+                </div>
+              </Link>
+            </div>
           ))}
         </div>
       )}
