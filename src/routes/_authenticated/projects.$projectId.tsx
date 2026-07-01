@@ -79,6 +79,115 @@ type Chapter = {
   generations_count: number;
 };
 
+type Geometry = { x: number; y: number; w: number; h: number };
+type Panel = {
+  id: string;
+  page_id: string;
+  panel_number: number;
+  reading_order: number;
+  geometry: Geometry | null;
+  scene_description: string | null;
+  framing: string | null;
+  camera: string | null;
+  prompt: string | null;
+  characters: string[] | null;
+  dialogues: Dialogue[] | null;
+  asset_url: string | null;
+  status: string;
+};
+type Page = {
+  id: string;
+  page_number: number;
+  reading_order: number;
+  panels: Panel[];
+};
+
+const BALLOON_STYLE: Record<string, string> = {
+  pensamento: "rounded-[50%] border-dashed",
+  narracao: "rounded-none bg-paper",
+  grito: "rounded-sm border-[3px]",
+  sussurro: "rounded-full border-dotted italic",
+  onomatopeia: "border-none bg-transparent font-display text-lg",
+};
+
+function PageView({ page, onRegen }: { page: Page; onRegen?: (panelId: string) => void }) {
+  const panels = [...page.panels].sort((a, b) => a.reading_order - b.reading_order);
+  return (
+    <div
+      className="manga-page relative mx-auto w-full max-w-[520px] overflow-hidden border-2 border-ink bg-paper"
+      style={{ aspectRatio: "1 / 1.414" }}
+    >
+      {panels.map((panel) => {
+        const g = panel.geometry ?? { x: 0, y: 0, w: 1, h: 1 };
+        return (
+          <div
+            key={panel.id}
+            className="absolute overflow-hidden border-2 border-ink"
+            style={{
+              left: `${g.x * 100}%`,
+              top: `${g.y * 100}%`,
+              width: `${g.w * 100}%`,
+              height: `${g.h * 100}%`,
+            }}
+          >
+            {panel.asset_url ? (
+              <img
+                src={panel.asset_url}
+                alt={panel.scene_description ?? ""}
+                className="h-full w-full object-cover"
+              />
+            ) : (
+              <div className="flex h-full w-full flex-col items-center justify-center gap-1 bg-muted p-2 text-center">
+                <span className="font-display text-xs uppercase tracking-wider text-muted-foreground">
+                  Quadro {panel.panel_number}
+                </span>
+                <span className="line-clamp-3 text-[10px] leading-tight text-muted-foreground">
+                  {panel.framing ? `${panel.framing} — ` : ""}
+                  {panel.scene_description}
+                </span>
+                {onRegen && (
+                  <button
+                    type="button"
+                    onClick={() => onRegen(panel.id)}
+                    className="mt-1 bg-ink px-2 py-0.5 text-[9px] uppercase tracking-wider text-paper"
+                  >
+                    Gerar arte
+                  </button>
+                )}
+              </div>
+            )}
+
+            {/* Balões: elementos independentes da imagem, editáveis antes de exportar */}
+            <div className="pointer-events-none absolute inset-0 flex flex-col items-center gap-1 p-1.5">
+              {(panel.dialogues ?? []).map((d, di) => {
+                const tipo = (d.tipo ?? "dialogo").toLowerCase();
+                const extra = BALLOON_STYLE[tipo] ?? "rounded-2xl";
+                return (
+                  <div
+                    key={di}
+                    contentEditable
+                    suppressContentEditableWarning
+                    className={`pointer-events-auto max-w-[92%] border-2 border-ink bg-paper px-2 py-0.5 text-center text-[10px] leading-tight text-ink shadow-sm outline-none ${extra}`}
+                  >
+                    {tipo === "narracao" && d.texto
+                      ? d.texto
+                      : d.personagem && tipo === "dialogo"
+                        ? d.texto
+                        : d.texto}
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        );
+      })}
+      <span className="absolute bottom-1 right-2 font-display text-xs text-ink/60">
+        {page.page_number}
+      </span>
+    </div>
+  );
+}
+
 function ProjectOverview() {
   const { projectId } = Route.useParams();
   const [project, setProject] = useState<Project | null>(null);
@@ -92,6 +201,12 @@ function ProjectOverview() {
   const [charError, setCharError] = useState<string | null>(null);
   const [generatingScript, setGeneratingScript] = useState(false);
   const [scriptError, setScriptError] = useState<string | null>(null);
+  const [pages, setPages] = useState<Page[]>([]);
+  const [generatingStoryboard, setGeneratingStoryboard] = useState(false);
+  const [storyboardError, setStoryboardError] = useState<string | null>(null);
+  const [generatingImages, setGeneratingImages] = useState(false);
+  const [imagesError, setImagesError] = useState<string | null>(null);
+  const [imgProgress, setImgProgress] = useState<{ done: number; total: number } | null>(null);
 
   useEffect(() => {
     supabase
@@ -129,8 +244,41 @@ function ProjectOverview() {
           .eq("chapter_number", 1)
           .maybeSingle();
         setChapter((chapterData as Chapter | null) ?? null);
+
+        await loadPages();
       });
   }, [projectId]);
+
+  async function loadPages() {
+    const { data: pageRows } = await supabase
+      .from("pages")
+      .select("id,page_number,reading_order")
+      .eq("project_id", projectId)
+      .order("page_number", { ascending: true });
+    if (!pageRows || pageRows.length === 0) {
+      setPages([]);
+      return;
+    }
+    const { data: panelRows } = await supabase
+      .from("panels")
+      .select(
+        "id,page_id,panel_number,reading_order,geometry,scene_description,framing,camera,prompt,characters,dialogues,asset_url,status",
+      )
+      .eq("project_id", projectId)
+      .order("reading_order", { ascending: true });
+    const panelsByPage = new Map<string, Panel[]>();
+    for (const panel of (panelRows as Panel[] | null) ?? []) {
+      const list = panelsByPage.get(panel.page_id) ?? [];
+      list.push(panel);
+      panelsByPage.set(panel.page_id, list);
+    }
+    setPages(
+      (pageRows as { id: string; page_number: number; reading_order: number }[]).map((p) => ({
+        ...p,
+        panels: panelsByPage.get(p.id) ?? [],
+      })),
+    );
+  }
 
   async function generateBible() {
     setGenerating(true);
@@ -210,6 +358,81 @@ function ProjectOverview() {
     }
   }
 
+  async function authHeader() {
+    const { data: sessionData } = await supabase.auth.getSession();
+    const token = sessionData.session?.access_token;
+    if (!token) throw new Error("Sessão expirada. Entre novamente.");
+    return { authorization: `Bearer ${token}` };
+  }
+
+  async function generateStoryboard() {
+    setGeneratingStoryboard(true);
+    setStoryboardError(null);
+    try {
+      const headers = await authHeader();
+      const response = await fetch(`/api/projects/${projectId}/generate-storyboard`, {
+        method: "POST",
+        headers,
+      });
+      const payload = await response.json();
+      if (!response.ok) throw new Error(payload.error ?? "Erro ao gerar storyboard.");
+      await loadPages();
+      setProject((current) =>
+        current ? { ...current, status: "creating_storyboard", current_step: "storyboard" } : current,
+      );
+    } catch (err) {
+      setStoryboardError(err instanceof Error ? err.message : "Erro ao gerar storyboard.");
+    } finally {
+      setGeneratingStoryboard(false);
+    }
+  }
+
+  async function generateImages() {
+    const allPanels = pages.flatMap((p) => p.panels);
+    const pending = allPanels.filter((p) => !p.asset_url);
+    if (pending.length === 0) return;
+    setGeneratingImages(true);
+    setImagesError(null);
+    setImgProgress({ done: 0, total: pending.length });
+    try {
+      const headers = await authHeader();
+      for (let i = 0; i < pending.length; i++) {
+        const panel = pending[i];
+        const response = await fetch(
+          `/api/projects/${projectId}/panels/${panel.id}/generate-image`,
+          { method: "POST", headers },
+        );
+        const payload = await response.json();
+        if (!response.ok) throw new Error(payload.error ?? "Erro ao gerar imagem do quadro.");
+        setImgProgress({ done: i + 1, total: pending.length });
+        await loadPages();
+      }
+      setProject((current) =>
+        current ? { ...current, status: "generating_images", current_step: "images" } : current,
+      );
+    } catch (err) {
+      setImagesError(err instanceof Error ? err.message : "Erro ao gerar imagens.");
+    } finally {
+      setGeneratingImages(false);
+    }
+  }
+
+  async function regenPanelImage(panelId: string) {
+    setImagesError(null);
+    try {
+      const headers = await authHeader();
+      const response = await fetch(
+        `/api/projects/${projectId}/panels/${panelId}/generate-image`,
+        { method: "POST", headers },
+      );
+      const payload = await response.json();
+      if (!response.ok) throw new Error(payload.error ?? "Erro ao gerar imagem do quadro.");
+      await loadPages();
+    } catch (err) {
+      setImagesError(err instanceof Error ? err.message : "Erro ao gerar imagem.");
+    }
+  }
+
   if (notFound) {
     return (
       <div className="mx-auto max-w-3xl px-6 py-20 text-center">
@@ -231,13 +454,19 @@ function ProjectOverview() {
       disabled: !bible,
     },
     { icon: BookOpen, t: "Roteiro", d: "Capítulos, cenas e diálogos.", disabled: !bible },
-    { icon: Layers, t: "Storyboard", d: "Layout das páginas e quadros.", disabled: true },
-    { icon: ImageIcon, t: "Geração visual", d: "Arte de cada quadro.", disabled: true },
-    { icon: FileDown, t: "Exportar PDF", d: "Pronto para publicar.", disabled: true },
+    { icon: Layers, t: "Storyboard", d: "Layout das páginas e quadros.", disabled: !chapter },
+    {
+      icon: ImageIcon,
+      t: "Geração visual",
+      d: "Arte de cada quadro.",
+      disabled: pages.length === 0,
+    },
+    { icon: FileDown, t: "Exportar PDF", d: "Pronto para publicar.", disabled: pages.length === 0 },
   ];
 
   return (
-    <div className="mx-auto max-w-5xl px-6 py-10">
+    <>
+    <div className="no-print mx-auto max-w-5xl px-6 py-10">
       <Link
         to="/dashboard"
         className="inline-flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground"
@@ -560,6 +789,112 @@ function ProjectOverview() {
         </section>
       )}
 
+      {chapter && (
+        <section className="ink-border mt-8 bg-card p-6">
+          <div className="flex flex-wrap items-start justify-between gap-3">
+            <div>
+              <h2 className="font-display text-2xl">STORYBOARD</h2>
+              <p className="mt-1 text-xs text-muted-foreground">
+                Páginas e quadros com layout e ordem de leitura, a partir do roteiro.
+              </p>
+            </div>
+            <button
+              type="button"
+              onClick={generateStoryboard}
+              disabled={generatingStoryboard}
+              className="bg-accent px-5 py-3 font-display tracking-wide text-accent-foreground disabled:opacity-50"
+            >
+              {generatingStoryboard
+                ? "GERANDO..."
+                : pages.length
+                  ? "REGERAR STORYBOARD"
+                  : "GERAR STORYBOARD"}
+            </button>
+          </div>
+
+          {storyboardError && (
+            <div className="mt-4 border-2 border-accent bg-accent/10 p-4 text-sm text-accent">
+              {storyboardError}
+            </div>
+          )}
+
+          {pages.length === 0 ? (
+            <p className="mt-5 text-sm text-muted-foreground">
+              Nenhum storyboard ainda. Gere o layout das páginas do capítulo 1.
+            </p>
+          ) : (
+            <>
+              <p className="mt-4 text-xs text-muted-foreground">
+                {pages.length} páginas • {pages.reduce((n, p) => n + p.panels.length, 0)} quadros
+              </p>
+              <div className="mt-5 grid gap-6 sm:grid-cols-2 lg:grid-cols-3">
+                {pages.map((page) => (
+                  <div key={page.id}>
+                    <PageView page={page} onRegen={regenPanelImage} />
+                  </div>
+                ))}
+              </div>
+            </>
+          )}
+        </section>
+      )}
+
+      {pages.length > 0 && (
+        <section className="ink-border mt-8 bg-card p-6">
+          <div className="flex flex-wrap items-start justify-between gap-3">
+            <div>
+              <h2 className="font-display text-2xl">GERAÇÃO VISUAL</h2>
+              <p className="mt-1 text-xs text-muted-foreground">
+                Arte de cada quadro com Character Lock. Textos ficam fora da imagem (§19).
+              </p>
+            </div>
+            <button
+              type="button"
+              onClick={generateImages}
+              disabled={generatingImages}
+              className="bg-ink px-5 py-3 font-display tracking-wide text-paper disabled:opacity-50"
+            >
+              {generatingImages
+                ? imgProgress
+                  ? `GERANDO ${imgProgress.done}/${imgProgress.total}...`
+                  : "GERANDO..."
+                : "GERAR ARTE DOS QUADROS"}
+            </button>
+          </div>
+          {imagesError && (
+            <div className="mt-4 border-2 border-accent bg-accent/10 p-4 text-sm text-accent">
+              {imagesError}
+            </div>
+          )}
+          <p className="mt-4 text-xs text-muted-foreground">
+            {pages.reduce((n, p) => n + p.panels.filter((q) => q.asset_url).length, 0)} de{" "}
+            {pages.reduce((n, p) => n + p.panels.length, 0)} quadros com arte gerada. Você pode
+            regenerar um quadro individual clicando nele no storyboard.
+          </p>
+        </section>
+      )}
+
+      {pages.length > 0 && (
+        <section className="ink-border mt-8 bg-card p-6">
+          <div className="flex flex-wrap items-start justify-between gap-3">
+            <div>
+              <h2 className="font-display text-2xl">EXPORTAR PDF</h2>
+              <p className="mt-1 text-xs text-muted-foreground">
+                Gera um PDF com as páginas na ordem de leitura. Use "Salvar como PDF" na janela de
+                impressão.
+              </p>
+            </div>
+            <button
+              type="button"
+              onClick={() => window.print()}
+              className="bg-accent px-5 py-3 font-display tracking-wide text-accent-foreground"
+            >
+              EXPORTAR PDF
+            </button>
+          </div>
+        </section>
+      )}
+
       <h2 className="mt-10 font-display text-2xl">PRÓXIMAS ETAPAS</h2>
       <p className="mt-1 text-sm text-muted-foreground">
         As etapas de IA serão liberadas conforme cada fase é implementada.
@@ -579,5 +914,13 @@ function ProjectOverview() {
         ))}
       </div>
     </div>
+
+    {/* Somente para impressão / exportação em PDF */}
+    <div id="print-root">
+      {pages.map((page) => (
+        <PageView key={page.id} page={page} />
+      ))}
+    </div>
+    </>
   );
 }

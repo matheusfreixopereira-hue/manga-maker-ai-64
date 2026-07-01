@@ -179,6 +179,124 @@ export type Database = {
           },
         ];
       };
+      pages: {
+        Row: {
+          approved: boolean;
+          chapter_id: string;
+          created_at: string;
+          final_image_path: string | null;
+          id: string;
+          page_number: number;
+          project_id: string;
+          reading_order: number;
+          status: string;
+          updated_at: string;
+          user_id: string;
+        };
+        Insert: {
+          approved?: boolean;
+          chapter_id: string;
+          created_at?: string;
+          final_image_path?: string | null;
+          id?: string;
+          page_number: number;
+          project_id: string;
+          reading_order?: number;
+          status?: string;
+          updated_at?: string;
+          user_id: string;
+        };
+        Update: {
+          approved?: boolean;
+          chapter_id?: string;
+          created_at?: string;
+          final_image_path?: string | null;
+          id?: string;
+          page_number?: number;
+          project_id?: string;
+          reading_order?: number;
+          status?: string;
+          updated_at?: string;
+          user_id?: string;
+        };
+        Relationships: [
+          {
+            foreignKeyName: "pages_chapter_id_fkey";
+            columns: ["chapter_id"];
+            isOneToOne: false;
+            referencedRelation: "chapters";
+            referencedColumns: ["id"];
+          },
+        ];
+      };
+      panels: {
+        Row: {
+          asset_url: string | null;
+          camera: string | null;
+          characters: Json;
+          created_at: string;
+          dialogues: Json;
+          framing: string | null;
+          geometry: Json;
+          id: string;
+          page_id: string;
+          panel_number: number;
+          project_id: string;
+          prompt: string | null;
+          reading_order: number;
+          scene_description: string | null;
+          status: string;
+          updated_at: string;
+          user_id: string;
+        };
+        Insert: {
+          asset_url?: string | null;
+          camera?: string | null;
+          characters?: Json;
+          created_at?: string;
+          dialogues?: Json;
+          framing?: string | null;
+          geometry?: Json;
+          id?: string;
+          page_id: string;
+          panel_number: number;
+          project_id: string;
+          prompt?: string | null;
+          reading_order?: number;
+          scene_description?: string | null;
+          status?: string;
+          updated_at?: string;
+          user_id: string;
+        };
+        Update: {
+          asset_url?: string | null;
+          camera?: string | null;
+          characters?: Json;
+          created_at?: string;
+          dialogues?: Json;
+          framing?: string | null;
+          geometry?: Json;
+          id?: string;
+          page_id?: string;
+          panel_number?: number;
+          project_id?: string;
+          prompt?: string | null;
+          reading_order?: number;
+          scene_description?: string | null;
+          status?: string;
+          updated_at?: string;
+          user_id?: string;
+        };
+        Relationships: [
+          {
+            foreignKeyName: "panels_page_id_fkey";
+            columns: ["page_id"];
+            isOneToOne: false;
+            referencedRelation: "pages";
+            referencedColumns: ["id"];
+          },
+        ];
+      };
       profiles: {
         Row: {
           avatar_url: string | null;

@@ -149,3 +149,29 @@
   visibility: hidden !important;
   pointer-events: none !important;
 }
+
+/* Exportação em PDF: na tela o #print-root fica oculto; ao imprimir só ele aparece,
+   uma página de mangá por folha. */
+#print-root {
+  display: none;
+}
+@media print {
+  @page {
+    size: A5 portrait;
+    margin: 0;
+  }
+  .no-print,
+  header {
+    display: none !important;
+  }
+  #print-root {
+    display: block !important;
+  }
+  #print-root .manga-page {
+    max-width: 100% !important;
+    width: 100% !important;
+    border: none !important;
+    page-break-after: always;
+    break-after: page;
+  }
+}
