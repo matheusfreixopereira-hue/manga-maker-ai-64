@@ -356,6 +356,200 @@ async function createProjectCharacters(request: Request, env: unknown, projectId
   return json({ characters });
 }
 
+type CharacterForScript = {
+  name: string;
+  role: string | null;
+  personality: string | null;
+  objective: string | null;
+};
+
+function buildScriptPrompt(
+  project: ProjectForBible,
+  bible: Json,
+  characters: CharacterForScript[],
+) {
+  const direction =
+    project.reading_direction === "ltr"
+      ? "esquerda para a direita (ocidental)"
+      : "direita para a esquerda (padrao japones)";
+
+  return [
+    "Voce e um roteirista senior de mangas. Transforme a historia no roteiro visual do CAPITULO 1 para um MVP em portugues do Brasil.",
+    "Responda SOMENTE com JSON valido, sem markdown.",
+    "",
+    "PRINCIPIO DE FIDELIDADE (obrigatorio): a Biblia da Obra e as fichas de personagens sao a fonte da verdade.",
+    "Nao invente acontecimentos que contradigam o material aprovado; nao renomeie personagens; use exatamente os nomes das fichas.",
+    "",
+    "LIMITES DO MVP: apenas o capitulo 1, entre 4 e 20 paginas. Direcao de leitura: " + direction + ".",
+    "Distribua as cenas de forma coerente com a quantidade estimada de paginas.",
+    "",
+    "Estrutura JSON obrigatoria:",
+    JSON.stringify({
+      titulo: "string",
+      objetivo: "string",
+      sinopse: "string",
+      conflito: "string",
+      gancho: "string",
+      paginas_estimadas: 12,
+      cenas: [
+        {
+          numero: 1,
+          local: "string",
+          horario: "string",
+          personagens: ["string"],
+          objetivo: "string",
+          acao: "descricao da acao visual da cena",
+          emocao: "string",
+          transicao: "como corta para a proxima cena",
+          dialogos: [
+            {
+              tipo: "dialogo | pensamento | narracao | grito | sussurro | onomatopeia",
+              personagem: "nome do personagem ou Narrador",
+              texto: "string",
+            },
+          ],
+        },
+      ],
+    }),
+    "",
+    "Personagens disponiveis (use estes nomes):",
+    JSON.stringify(characters),
+    "",
+    "Biblia da Obra:",
+    JSON.stringify(bible),
+  ].join("\n");
+}
+
+async function createProjectScript(request: Request, env: unknown, projectId: string) {
+  if (request.method !== "POST") return json({ error: "Metodo nao permitido" }, 405);
+
+  const supabaseUrl = readEnv(env, "SUPABASE_URL");
+  const supabaseKey = readEnv(env, "SUPABASE_PUBLISHABLE_KEY");
+  const openaiKey = readEnv(env, "OPENAI_API_KEY");
+  const model = readEnv(env, "OPENAI_MODEL") ?? "gpt-5.5";
+  const token = extractBearerToken(request);
+
+  if (!supabaseUrl || !supabaseKey) return json({ error: "Supabase nao configurado" }, 500);
+  if (!openaiKey) return json({ error: "OPENAI_API_KEY nao configurada" }, 500);
+  if (!token) return json({ error: "Sessao ausente" }, 401);
+
+  const supabase = createClient<Database>(supabaseUrl, supabaseKey, {
+    global: { headers: { Authorization: `Bearer ${token}` } },
+    auth: { persistSession: false, autoRefreshToken: false },
+  });
+
+  const { data: userData, error: userError } = await supabase.auth.getUser(token);
+  if (userError || !userData.user) return json({ error: "Sessao invalida" }, 401);
+
+  const { data: project, error: projectError } = await supabase
+    .from("projects")
+    .select(
+      "id,user_id,title,description,creation_mode,initial_idea,genre,tone,age_rating,color_mode,reading_direction,page_format,dialogue_language",
+    )
+    .eq("id", projectId)
+    .eq("user_id", userData.user.id)
+    .maybeSingle();
+
+  if (projectError) return json({ error: projectError.message }, 500);
+  if (!project) return json({ error: "Projeto nao encontrado" }, 404);
+
+  const { data: bibleRow } = await supabase
+    .from("project_bibles")
+    .select("content")
+    .eq("project_id", project.id)
+    .maybeSingle();
+
+  if (!bibleRow) return json({ error: "Gere o planejamento da obra antes do roteiro." }, 400);
+
+  const { data: characters } = await supabase
+    .from("characters")
+    .select("name,role,personality,objective")
+    .eq("project_id", project.id)
+    .order("sort_order", { ascending: true });
+
+  const openaiResponse = await fetch("https://api.openai.com/v1/responses", {
+    method: "POST",
+    headers: {
+      authorization: `Bearer ${openaiKey}`,
+      "content-type": "application/json",
+    },
+    body: JSON.stringify({
+      model,
+      input: buildScriptPrompt(project, bibleRow.content, (characters ?? []) as CharacterForScript[]),
+      temperature: 0.7,
+    }),
+  });
+
+  const openaiPayload = await openaiResponse.json().catch(() => null);
+  if (!openaiResponse.ok) {
+    const message =
+      openaiPayload && typeof openaiPayload === "object" && "error" in openaiPayload
+        ? JSON.stringify((openaiPayload as { error: unknown }).error)
+        : "Erro ao chamar OpenAI";
+    return json({ error: message }, 502);
+  }
+
+  const text = extractOpenAIText(openaiPayload);
+  let script: {
+    titulo?: string;
+    objetivo?: string;
+    sinopse?: string;
+    conflito?: string;
+    gancho?: string;
+    paginas_estimadas?: number;
+    cenas?: unknown[];
+  };
+  try {
+    script = JSON.parse(text);
+  } catch {
+    return json({ error: "A IA nao retornou o roteiro em JSON valido. Tente novamente." }, 502);
+  }
+
+  if (!Array.isArray(script.cenas) || script.cenas.length === 0) {
+    return json({ error: "O roteiro veio sem cenas. Tente novamente." }, 502);
+  }
+
+  const { data: existing } = await supabase
+    .from("chapters")
+    .select("generations_count")
+    .eq("project_id", project.id)
+    .eq("chapter_number", 1)
+    .maybeSingle();
+
+  const { data: chapter, error: chapterError } = await supabase
+    .from("chapters")
+    .upsert(
+      {
+        project_id: project.id,
+        user_id: userData.user.id,
+        chapter_number: 1,
+        title: script.titulo ?? null,
+        synopsis: script.sinopse ?? null,
+        objective: script.objetivo ?? null,
+        conflict: script.conflito ?? null,
+        hook: script.gancho ?? null,
+        estimated_pages:
+          typeof script.paginas_estimadas === "number" ? script.paginas_estimadas : null,
+        script: script as Json,
+        status: "draft",
+        model,
+        generations_count: (existing?.generations_count ?? 0) + 1,
+      },
+      { onConflict: "project_id,chapter_number" },
+    )
+    .select("*")
+    .single();
+
+  if (chapterError) return json({ error: chapterError.message }, 500);
+
+  await supabase
+    .from("projects")
+    .update({ status: "creating_storyboard", current_step: "script" })
+    .eq("id", project.id);
+
+  return json({ chapter });
+}
+
 async function getServerEntry(): Promise<ServerEntry> {
   if (!serverEntryPromise) {
     serverEntryPromise = import("@tanstack/react-start/server-entry").then(
@@ -398,6 +592,13 @@ export default {
       );
       if (generateCharactersMatch) {
         return await createProjectCharacters(request, env, generateCharactersMatch[1]);
+      }
+
+      const generateScriptMatch = url.pathname.match(
+        /^\/api\/projects\/([^/]+)\/generate-script$/,
+      );
+      if (generateScriptMatch) {
+        return await createProjectScript(request, env, generateScriptMatch[1]);
       }
 
       const handler = await getServerEntry();

@@ -53,16 +53,45 @@ type Character = {
   sort_order: number;
 };
 
+type Dialogue = { tipo?: string; personagem?: string; texto?: string };
+type Scene = {
+  numero?: number;
+  local?: string;
+  horario?: string;
+  personagens?: string[];
+  objetivo?: string;
+  acao?: string;
+  emocao?: string;
+  transicao?: string;
+  dialogos?: Dialogue[];
+};
+type Chapter = {
+  id: string;
+  chapter_number: number;
+  title: string | null;
+  synopsis: string | null;
+  objective: string | null;
+  conflict: string | null;
+  hook: string | null;
+  estimated_pages: number | null;
+  script: { cenas?: Scene[] } | null;
+  model: string | null;
+  generations_count: number;
+};
+
 function ProjectOverview() {
   const { projectId } = Route.useParams();
   const [project, setProject] = useState<Project | null>(null);
   const [bible, setBible] = useState<ProjectBible | null>(null);
   const [characters, setCharacters] = useState<Character[]>([]);
+  const [chapter, setChapter] = useState<Chapter | null>(null);
   const [notFound, setNotFound] = useState(false);
   const [generating, setGenerating] = useState(false);
   const [generationError, setGenerationError] = useState<string | null>(null);
   const [generatingChars, setGeneratingChars] = useState(false);
   const [charError, setCharError] = useState<string | null>(null);
+  const [generatingScript, setGeneratingScript] = useState(false);
+  const [scriptError, setScriptError] = useState<string | null>(null);
 
   useEffect(() => {
     supabase
@@ -90,6 +119,16 @@ function ProjectOverview() {
           .eq("project_id", projectId)
           .order("sort_order", { ascending: true });
         setCharacters((charData as Character[] | null) ?? []);
+
+        const { data: chapterData } = await supabase
+          .from("chapters")
+          .select(
+            "id,chapter_number,title,synopsis,objective,conflict,hook,estimated_pages,script,model,generations_count",
+          )
+          .eq("project_id", projectId)
+          .eq("chapter_number", 1)
+          .maybeSingle();
+        setChapter((chapterData as Chapter | null) ?? null);
       });
   }, [projectId]);
 
@@ -145,6 +184,32 @@ function ProjectOverview() {
     }
   }
 
+  async function generateScript() {
+    setGeneratingScript(true);
+    setScriptError(null);
+    try {
+      const { data: sessionData } = await supabase.auth.getSession();
+      const token = sessionData.session?.access_token;
+      if (!token) throw new Error("Sessão expirada. Entre novamente.");
+
+      const response = await fetch(`/api/projects/${projectId}/generate-script`, {
+        method: "POST",
+        headers: { authorization: `Bearer ${token}` },
+      });
+      const payload = await response.json();
+      if (!response.ok) throw new Error(payload.error ?? "Erro ao gerar roteiro.");
+
+      setChapter(payload.chapter as Chapter);
+      setProject((current) =>
+        current ? { ...current, status: "creating_storyboard", current_step: "script" } : current,
+      );
+    } catch (err) {
+      setScriptError(err instanceof Error ? err.message : "Erro ao gerar roteiro.");
+    } finally {
+      setGeneratingScript(false);
+    }
+  }
+
   if (notFound) {
     return (
       <div className="mx-auto max-w-3xl px-6 py-20 text-center">
@@ -165,7 +230,7 @@ function ProjectOverview() {
       d: "Detecção, fichas e Character Lock.",
       disabled: !bible,
     },
-    { icon: BookOpen, t: "Roteiro", d: "Capítulos, cenas e diálogos.", disabled: true },
+    { icon: BookOpen, t: "Roteiro", d: "Capítulos, cenas e diálogos.", disabled: !bible },
     { icon: Layers, t: "Storyboard", d: "Layout das páginas e quadros.", disabled: true },
     { icon: ImageIcon, t: "Geração visual", d: "Arte de cada quadro.", disabled: true },
     { icon: FileDown, t: "Exportar PDF", d: "Pronto para publicar.", disabled: true },
@@ -352,6 +417,144 @@ function ProjectOverview() {
                   )}
                 </article>
               ))}
+            </div>
+          )}
+        </section>
+      )}
+
+      {bible && (
+        <section className="ink-border mt-8 bg-card p-6">
+          <div className="flex flex-wrap items-start justify-between gap-3">
+            <div>
+              <h2 className="font-display text-2xl">ROTEIRO — CAPÍTULO 1</h2>
+              <p className="mt-1 text-xs text-muted-foreground">
+                Cenas e diálogos do capítulo 1, fiéis ao planejamento e aos personagens.
+                {chapter && (
+                  <>
+                    {" "}
+                    Modelo: {chapter.model} • Gerações: {chapter.generations_count}
+                  </>
+                )}
+              </p>
+            </div>
+            <button
+              type="button"
+              onClick={generateScript}
+              disabled={generatingScript}
+              className="bg-accent px-5 py-3 font-display tracking-wide text-accent-foreground disabled:opacity-50"
+            >
+              {generatingScript ? "GERANDO..." : chapter ? "REGERAR ROTEIRO" : "GERAR ROTEIRO"}
+            </button>
+          </div>
+
+          {characters.length === 0 && !chapter && (
+            <p className="mt-4 text-xs text-muted-foreground">
+              Dica: gere os personagens primeiro para o roteiro usar os nomes e mantê-los
+              consistentes.
+            </p>
+          )}
+
+          {scriptError && (
+            <div className="mt-4 border-2 border-accent bg-accent/10 p-4 text-sm text-accent">
+              {scriptError}
+            </div>
+          )}
+
+          {!chapter ? (
+            <p className="mt-5 text-sm text-muted-foreground">
+              Nenhum roteiro ainda. Gere o capítulo 1 em cenas e diálogos.
+            </p>
+          ) : (
+            <div className="mt-5">
+              <div className="border-2 border-ink bg-background p-4">
+                <div className="flex flex-wrap items-baseline justify-between gap-2">
+                  <h3 className="font-display text-2xl">{chapter.title ?? "Capítulo 1"}</h3>
+                  {chapter.estimated_pages != null && (
+                    <span className="bg-ink px-2 py-1 text-[10px] font-semibold uppercase tracking-wider text-paper">
+                      ~{chapter.estimated_pages} páginas
+                    </span>
+                  )}
+                </div>
+                {chapter.synopsis && <p className="mt-2 text-sm">{chapter.synopsis}</p>}
+                <dl className="mt-3 space-y-1.5 text-xs">
+                  {chapter.objective && (
+                    <div>
+                      <dt className="inline font-semibold uppercase tracking-wider text-muted-foreground">
+                        Objetivo:{" "}
+                      </dt>
+                      <dd className="inline">{chapter.objective}</dd>
+                    </div>
+                  )}
+                  {chapter.conflict && (
+                    <div>
+                      <dt className="inline font-semibold uppercase tracking-wider text-muted-foreground">
+                        Conflito:{" "}
+                      </dt>
+                      <dd className="inline">{chapter.conflict}</dd>
+                    </div>
+                  )}
+                  {chapter.hook && (
+                    <div>
+                      <dt className="inline font-semibold uppercase tracking-wider text-muted-foreground">
+                        Gancho:{" "}
+                      </dt>
+                      <dd className="inline">{chapter.hook}</dd>
+                    </div>
+                  )}
+                </dl>
+              </div>
+
+              <ol className="mt-4 space-y-4">
+                {(chapter.script?.cenas ?? []).map((scene, index) => (
+                  <li key={index} className="border-2 border-ink/70 bg-background p-4">
+                    <div className="flex flex-wrap items-baseline gap-2">
+                      <span className="font-display text-lg">
+                        CENA {scene.numero ?? index + 1}
+                      </span>
+                      {scene.local && (
+                        <span className="text-sm text-muted-foreground">
+                          {scene.local}
+                          {scene.horario ? ` · ${scene.horario}` : ""}
+                        </span>
+                      )}
+                    </div>
+                    {scene.acao && <p className="mt-2 text-sm">{scene.acao}</p>}
+                    <div className="mt-1 flex flex-wrap gap-1.5 text-[11px]">
+                      {scene.emocao && (
+                        <span className="border border-ink/40 bg-muted px-2 py-0.5">
+                          {scene.emocao}
+                        </span>
+                      )}
+                      {(scene.personagens ?? []).map((p) => (
+                        <span key={p} className="border border-ink/40 bg-muted px-2 py-0.5">
+                          {p}
+                        </span>
+                      ))}
+                    </div>
+                    {(scene.dialogos ?? []).length > 0 && (
+                      <ul className="mt-3 space-y-1.5 border-t-2 border-ink/20 pt-3 text-sm">
+                        {(scene.dialogos ?? []).map((d, di) => (
+                          <li key={di}>
+                            <span className="font-semibold">{d.personagem ?? "—"}</span>
+                            {d.tipo && d.tipo !== "dialogo" && (
+                              <span className="ml-1 text-[10px] uppercase tracking-wider text-muted-foreground">
+                                ({d.tipo})
+                              </span>
+                            )}
+                            <span className="text-muted-foreground">: </span>
+                            {d.texto}
+                          </li>
+                        ))}
+                      </ul>
+                    )}
+                    {scene.transicao && (
+                      <p className="mt-3 text-[11px] italic text-muted-foreground">
+                        → {scene.transicao}
+                      </p>
+                    )}
+                  </li>
+                ))}
+              </ol>
             </div>
           )}
         </section>

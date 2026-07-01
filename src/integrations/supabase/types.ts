@@ -8,6 +8,74 @@ export type Database = {
   };
   public: {
     Tables: {
+      chapters: {
+        Row: {
+          approved: boolean;
+          chapter_number: number;
+          conflict: string | null;
+          created_at: string;
+          estimated_pages: number | null;
+          generations_count: number;
+          hook: string | null;
+          id: string;
+          model: string | null;
+          objective: string | null;
+          project_id: string;
+          script: Json;
+          status: string;
+          synopsis: string | null;
+          title: string | null;
+          updated_at: string;
+          user_id: string;
+        };
+        Insert: {
+          approved?: boolean;
+          chapter_number?: number;
+          conflict?: string | null;
+          created_at?: string;
+          estimated_pages?: number | null;
+          generations_count?: number;
+          hook?: string | null;
+          id?: string;
+          model?: string | null;
+          objective?: string | null;
+          project_id: string;
+          script?: Json;
+          status?: string;
+          synopsis?: string | null;
+          title?: string | null;
+          updated_at?: string;
+          user_id: string;
+        };
+        Update: {
+          approved?: boolean;
+          chapter_number?: number;
+          conflict?: string | null;
+          created_at?: string;
+          estimated_pages?: number | null;
+          generations_count?: number;
+          hook?: string | null;
+          id?: string;
+          model?: string | null;
+          objective?: string | null;
+          project_id?: string;
+          script?: Json;
+          status?: string;
+          synopsis?: string | null;
+          title?: string | null;
+          updated_at?: string;
+          user_id?: string;
+        };
+        Relationships: [
+          {
+            foreignKeyName: "chapters_project_id_fkey";
+            columns: ["project_id"];
+            isOneToOne: false;
+            referencedRelation: "projects";
+            referencedColumns: ["id"];
+          },
+        ];
+      };
       characters: {
         Row: {
           age: string | null;
