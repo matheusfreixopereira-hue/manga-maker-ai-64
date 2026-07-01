@@ -102,6 +102,75 @@ type Page = {
   panels: Panel[];
 };
 
+function humanizeKey(key: string) {
+  return key
+    .replace(/_/g, " ")
+    .replace(/\b\w/g, (c) => c.toUpperCase());
+}
+
+// Desembrulha o conteúdo do planejamento: lida com o formato antigo { resposta: "..." }
+// e com JSON salvo como string (dupla codificação).
+function normalizeBible(raw: unknown): unknown {
+  let c = raw;
+  if (c && typeof c === "object" && "resposta" in c) {
+    const r = (c as { resposta?: unknown }).resposta;
+    if (typeof r === "string") c = r;
+  }
+  for (let i = 0; i < 3 && typeof c === "string"; i++) {
+    try {
+      c = JSON.parse(c);
+    } catch {
+      break;
+    }
+  }
+  return c;
+}
+
+// Renderiza qualquer estrutura JSON de forma legível (texto, listas e cards).
+function RenderValue({ value }: { value: unknown }) {
+  if (value === null || value === undefined || value === "") {
+    return <span className="text-muted-foreground">—</span>;
+  }
+  if (typeof value === "string" || typeof value === "number" || typeof value === "boolean") {
+    return <span className="whitespace-pre-wrap">{String(value)}</span>;
+  }
+  if (Array.isArray(value)) {
+    const allPrimitive = value.every((v) => v === null || typeof v !== "object");
+    if (allPrimitive) {
+      return (
+        <ul className="list-disc space-y-1 pl-5">
+          {value.map((v, i) => (
+            <li key={i}>{String(v)}</li>
+          ))}
+        </ul>
+      );
+    }
+    return (
+      <div className="space-y-3">
+        {value.map((v, i) => (
+          <div key={i} className="border-2 border-ink/40 bg-background p-3">
+            <RenderValue value={v} />
+          </div>
+        ))}
+      </div>
+    );
+  }
+  return (
+    <div className="space-y-3">
+      {Object.entries(value as Record<string, unknown>).map(([k, v]) => (
+        <div key={k}>
+          <div className="font-display text-[11px] uppercase tracking-widest text-accent">
+            {humanizeKey(k)}
+          </div>
+          <div className="mt-0.5 text-sm">
+            <RenderValue value={v} />
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
 const BALLOON_STYLE: Record<string, string> = {
   pensamento: "rounded-[50%] border-dashed",
   narracao: "rounded-none bg-paper",
@@ -543,9 +612,9 @@ function ProjectOverview() {
               Aguardando aprovação
             </span>
           </div>
-          <pre className="mt-5 max-h-[560px] overflow-auto whitespace-pre-wrap border-2 border-ink bg-background p-4 text-xs leading-relaxed">
-            {JSON.stringify(bible.content, null, 2)}
-          </pre>
+          <div className="mt-5 max-h-[640px] overflow-auto border-2 border-ink bg-background p-5 leading-relaxed">
+            <RenderValue value={normalizeBible(bible.content)} />
+          </div>
         </section>
       )}
 
@@ -845,7 +914,8 @@ function ProjectOverview() {
             <div>
               <h2 className="font-display text-2xl">GERAÇÃO VISUAL</h2>
               <p className="mt-1 text-xs text-muted-foreground">
-                Arte de cada quadro com Character Lock. Textos ficam fora da imagem (§19).
+                Arte de cada quadro, mantendo os personagens consistentes. Os textos e balões
+                ficam por cima da arte, não dentro dela.
               </p>
             </div>
             <button

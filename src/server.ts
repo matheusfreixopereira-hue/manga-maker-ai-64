@@ -109,6 +109,25 @@ function extractOpenAIText(payload: unknown) {
   );
 }
 
+// Parse tolerante: com text.format json_object a saida ja e JSON valido, mas isto
+// protege contra cercas markdown ou texto extra caso o modelo escape do formato.
+function parseJsonLoose(raw: string): unknown {
+  let t = raw.trim();
+  const fence = t.match(/^```(?:json)?\s*([\s\S]*?)\s*```$/i);
+  if (fence) t = fence[1].trim();
+  try {
+    return JSON.parse(t);
+  } catch {
+    const firstObj = t.indexOf("{");
+    const firstArr = t.indexOf("[");
+    const candidates = [firstObj, firstArr].filter((i) => i !== -1);
+    const start = candidates.length ? Math.min(...candidates) : -1;
+    const end = Math.max(t.lastIndexOf("}"), t.lastIndexOf("]"));
+    if (start !== -1 && end > start) return JSON.parse(t.slice(start, end + 1));
+    throw new Error("resposta sem JSON valido");
+  }
+}
+
 async function createProjectBible(request: Request, env: unknown, projectId: string) {
   if (request.method !== "POST") return json({ error: "Metodo nao permitido" }, 405);
 
@@ -151,6 +170,8 @@ async function createProjectBible(request: Request, env: unknown, projectId: str
     body: JSON.stringify({
       model,
       input: buildBiblePrompt(project),
+      text: { format: { type: "json_object" } },
+      max_output_tokens: 16000,
     }),
   });
 
@@ -166,7 +187,7 @@ async function createProjectBible(request: Request, env: unknown, projectId: str
   const text = extractOpenAIText(openaiPayload);
   let content: Json;
   try {
-    content = JSON.parse(text) as Json;
+    content = parseJsonLoose(text) as Json;
   } catch {
     content = { resposta: text };
   }
@@ -296,6 +317,8 @@ async function createProjectCharacters(request: Request, env: unknown, projectId
     body: JSON.stringify({
       model,
       input: buildCharactersPrompt(project, bibleRow.content),
+      text: { format: { type: "json_object" } },
+      max_output_tokens: 16000,
     }),
   });
 
@@ -311,7 +334,7 @@ async function createProjectCharacters(request: Request, env: unknown, projectId
   const text = extractOpenAIText(openaiPayload);
   let list: GeneratedCharacter[] = [];
   try {
-    const parsed = JSON.parse(text) as { personagens?: GeneratedCharacter[] } | GeneratedCharacter[];
+    const parsed = parseJsonLoose(text) as { personagens?: GeneratedCharacter[] } | GeneratedCharacter[];
     list = Array.isArray(parsed) ? parsed : (parsed.personagens ?? []);
   } catch {
     return json({ error: "A IA nao retornou personagens em JSON valido. Tente novamente." }, 502);
@@ -474,6 +497,8 @@ async function createProjectScript(request: Request, env: unknown, projectId: st
     body: JSON.stringify({
       model,
       input: buildScriptPrompt(project, bibleRow.content, (characters ?? []) as CharacterForScript[]),
+      text: { format: { type: "json_object" } },
+      max_output_tokens: 16000,
     }),
   });
 
@@ -497,7 +522,7 @@ async function createProjectScript(request: Request, env: unknown, projectId: st
     cenas?: unknown[];
   };
   try {
-    script = JSON.parse(text);
+    script = parseJsonLoose(text) as typeof script;
   } catch {
     return json({ error: "A IA nao retornou o roteiro em JSON valido. Tente novamente." }, 502);
   }
@@ -722,6 +747,8 @@ async function createProjectStoryboard(request: Request, env: unknown, projectId
     body: JSON.stringify({
       model,
       input: buildStoryboardPrompt(project, chapter.script, locks),
+      text: { format: { type: "json_object" } },
+      max_output_tokens: 16000,
     }),
   });
 
@@ -737,7 +764,7 @@ async function createProjectStoryboard(request: Request, env: unknown, projectId
   const text = extractOpenAIText(openaiPayload);
   let parsed: { paginas?: AiPage[] };
   try {
-    parsed = JSON.parse(text);
+    parsed = parseJsonLoose(text) as { paginas?: AiPage[] };
   } catch {
     return json({ error: "O storyboard nao veio em JSON valido. Tente novamente." }, 502);
   }
