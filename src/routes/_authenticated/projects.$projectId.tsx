@@ -106,14 +106,14 @@ function ProjectOverview() {
         headers: { authorization: `Bearer ${token}` },
       });
       const payload = await response.json();
-      if (!response.ok) throw new Error(payload.error ?? "Erro ao gerar Bíblia da Obra.");
+      if (!response.ok) throw new Error(payload.error ?? "Erro ao gerar o planejamento.");
 
       setBible(payload.bible as ProjectBible);
       setProject((current) =>
         current ? { ...current, status: "awaiting_approval", current_step: "bible" } : current,
       );
     } catch (err) {
-      setGenerationError(err instanceof Error ? err.message : "Erro ao gerar Bíblia da Obra.");
+      setGenerationError(err instanceof Error ? err.message : "Erro ao gerar o planejamento.");
     } finally {
       setGenerating(false);
     }
@@ -158,7 +158,7 @@ function ProjectOverview() {
   if (!project) return <div className="mx-auto max-w-3xl px-6 py-20">Carregando...</div>;
 
   const steps = [
-    { icon: Sparkles, t: "Bíblia da Obra", d: "História, universo, regras.", disabled: false },
+    { icon: Sparkles, t: "Planejamento", d: "História, universo, regras.", disabled: false },
     {
       icon: Users,
       t: "Personagens",
@@ -212,7 +212,11 @@ function ProjectOverview() {
             disabled={generating}
             className="bg-accent px-5 py-3 font-display tracking-wide text-accent-foreground disabled:opacity-50"
           >
-            {generating ? "GERANDO..." : bible ? "REGERAR BÍBLIA" : "GERAR BÍBLIA"}
+            {generating
+              ? "GERANDO..."
+              : bible
+                ? "REFAZER PLANEJAMENTO"
+                : "COMEÇAR MEU MANGÁ"}
           </button>
         </div>
 
@@ -236,7 +240,7 @@ function ProjectOverview() {
         <section className="ink-border mt-8 bg-card p-6">
           <div className="flex flex-wrap items-start justify-between gap-3">
             <div>
-              <h2 className="font-display text-2xl">BÍBLIA DA OBRA</h2>
+              <h2 className="font-display text-2xl">PLANEJAMENTO DA OBRA</h2>
               <p className="mt-1 text-xs text-muted-foreground">
                 Modelo: {bible.model} • Gerações: {bible.generations_count}
               </p>
@@ -257,7 +261,7 @@ function ProjectOverview() {
             <div>
               <h2 className="font-display text-2xl">PERSONAGENS</h2>
               <p className="mt-1 text-xs text-muted-foreground">
-                Fichas e Character Lock extraídos da Bíblia da Obra.
+                Fichas e Character Lock extraídos do planejamento da obra.
               </p>
             </div>
             <button
@@ -282,7 +286,7 @@ function ProjectOverview() {
 
           {characters.length === 0 ? (
             <p className="mt-5 text-sm text-muted-foreground">
-              Nenhum personagem ainda. Gere o elenco do capítulo 1 a partir da Bíblia da Obra.
+              Nenhum personagem ainda. Gere o elenco do capítulo 1 a partir do planejamento.
             </p>
           ) : (
             <div className="mt-5 grid gap-4 sm:grid-cols-2">

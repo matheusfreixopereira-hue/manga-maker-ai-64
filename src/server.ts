@@ -286,7 +286,7 @@ async function createProjectCharacters(request: Request, env: unknown, projectId
     .eq("project_id", project.id)
     .maybeSingle();
 
-  if (!bibleRow) return json({ error: "Gere a Biblia da Obra antes dos personagens." }, 400);
+  if (!bibleRow) return json({ error: "Gere o planejamento da obra antes dos personagens." }, 400);
 
   const openaiResponse = await fetch("https://api.openai.com/v1/responses", {
     method: "POST",

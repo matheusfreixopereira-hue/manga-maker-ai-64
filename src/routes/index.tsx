@@ -53,8 +53,8 @@ function Landing() {
               <span className="text-accent">EM HORAS, NÃO MESES.</span>
             </h1>
             <p className="mt-6 max-w-xl text-lg text-muted-foreground">
-              Cole uma história, envie um PDF ou descreva uma ideia. A IA monta a bíblia da obra,
-              cria personagens consistentes, gera storyboard, quadros e exporta o PDF pronto.
+              Cole uma história, envie um PDF ou descreva uma ideia. A IA monta o planejamento da
+              obra, cria personagens consistentes, gera storyboard, quadros e exporta o PDF pronto.
             </p>
             <div className="mt-8 flex flex-wrap gap-3">
               <Link

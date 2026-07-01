@@ -11,6 +11,7 @@ import { useEffect, type ReactNode } from "react";
 
 import appCss from "../styles.css?url";
 import { reportLovableError } from "../lib/lovable-error-reporting";
+import { completeLovableOAuthRedirect } from "../integrations/lovable/oauth-callback";
 
 function NotFoundComponent() {
   return (
@@ -140,6 +141,19 @@ function RootShell({ children }: { children: ReactNode }) {
 
 function RootComponent() {
   const { queryClient } = Route.useRouteContext();
+  const router = useRouter();
+
+  // Fecha o fluxo OAuth de redirect: se o broker do Lovable voltou com tokens na URL,
+  // grava a sessão e leva ao dashboard. Sem isto o login com Google fica em loop.
+  useEffect(() => {
+    completeLovableOAuthRedirect().then((result) => {
+      if (result.status === "signed_in") {
+        router.navigate({ to: "/dashboard" });
+      } else if (result.status === "error") {
+        console.error("[oauth] Falha ao concluir login:", result.message);
+      }
+    });
+  }, [router]);
 
   return (
     <QueryClientProvider client={queryClient}>
