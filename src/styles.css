@@ -140,3 +140,12 @@
     mask-image: linear-gradient(to bottom, black 0%, black 72%, transparent 100%);
   }
 }
+
+/* Oculta o badge "Edit with Lovable" injetado pela plataforma no HTML servido.
+   O !important vence o display inline aplicado pelo script do badge. */
+#lovable-badge,
+#lovable-badge-root {
+  display: none !important;
+  visibility: hidden !important;
+  pointer-events: none !important;
+}
