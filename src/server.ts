@@ -450,6 +450,9 @@ function buildScriptPrompt(
     "LIMITES DO MVP: apenas o capitulo 1, entre 4 e 20 paginas. Direcao de leitura: " + direction + ".",
     "Distribua as cenas de forma coerente com a quantidade estimada de paginas.",
     "",
+    "DIALOGOS CURTOS (obrigatorio): cada fala/pensamento/narracao deve ter NO MAXIMO 12 palavras (~80 caracteres).",
+    "Fala longa = quebre em varias falas curtas alternadas ou corte o que nao for essencial. Nunca escreva paragrafos dentro de um balao.",
+    "",
     "Estrutura JSON obrigatoria:",
     JSON.stringify({
       titulo: "string",
@@ -686,6 +689,8 @@ function buildStoryboardPrompt(
     "Direcao de leitura: " + direction + ". Defina reading_order de cada quadro seguindo essa direcao.",
     "Geometria: cada quadro tem { x, y, w, h } em fracoes de 0 a 1 da pagina; os quadros de uma pagina devem preencher a pagina sem sobrepor.",
     "Distribua os dialogos do roteiro entre os quadros correspondentes.",
+    "BALOES (obrigatorio): NO MAXIMO 3 dialogos por quadro e cada fala com NO MAXIMO 12 palavras (~80 caracteres).",
+    "Se uma cena tem muitos dialogos, crie MAIS quadros para distribui-los; encurte falas longas sem perder o sentido.",
     "",
     "ENQUADRAMENTOS (obrigatorio variar): o primeiro quadro de cada cena/local deve ser plano geral (establishing shot) mostrando o ambiente. Use no MAXIMO 1 close por pagina; prefira plano geral, plano medio e plano americano. A descricao de cada quadro deve dizer a ACAO que acontece, nao apenas quem aparece.",
     "CENARIO: todo quadro deve ter o campo 'cenario' descrevendo o ambiente/fundo visivel (local, objetos, iluminacao, clima, profundidade).",
@@ -841,7 +846,8 @@ async function createProjectStoryboard(request: Request, env: unknown, projectId
         framing: q.enquadramento ?? null,
         camera: q.camera ?? null,
         characters: (q.personagens ?? []) as Json,
-        dialogues: (q.dialogos ?? []) as Json,
+        // Cap de 4 balões por quadro — mais que isso cobre a arte na renderização.
+        dialogues: (q.dialogos ?? []).slice(0, 4) as Json,
         prompt: buildPanelImagePrompt(
           project,
           {

@@ -226,28 +226,44 @@ function PageView({ page, onRegen }: { page: Page; onRegen?: (panelId: string) =
               </div>
             )}
 
-            {/* Balões: ficam no topo, alternando os cantos (estilo mangá), nunca sobre
-                o centro/rosto. Narração vai no topo em caixa retangular. Editáveis. */}
-            <div className="pointer-events-none absolute inset-x-0 top-0 flex flex-col gap-1 p-1.5">
-              {(panel.dialogues ?? []).map((d, di) => {
+            {/* Balões: pequenos e nos cantos (estilo mangá), nunca cobrindo o centro/rosto.
+                Máx. 2 no topo; o restante vai para a base do quadro. Texto clampado em
+                4 linhas para nenhum balão engolir a arte. Editáveis. */}
+            {(() => {
+              const dialogues = (panel.dialogues ?? []).slice(0, 4);
+              const top = dialogues.slice(0, 2);
+              const bottom = dialogues.slice(2);
+              const renderBalloon = (d: Dialogue, di: number) => {
                 const tipo = (d.tipo ?? "dialogo").toLowerCase();
                 const extra = BALLOON_STYLE[tipo] ?? "rounded-2xl";
                 const isNarration = tipo === "narracao";
                 // Diálogos alternam canto direito/esquerdo (leitura mangá); narração fica à esquerda.
                 const side = isNarration ? "self-start" : di % 2 === 0 ? "self-end" : "self-start";
-                const width = isNarration ? "max-w-[80%]" : "max-w-[56%]";
+                const width = isNarration ? "max-w-[65%]" : "max-w-[45%]";
                 return (
                   <div
                     key={di}
                     contentEditable
                     suppressContentEditableWarning
-                    className={`pointer-events-auto ${side} ${width} border-2 border-ink bg-paper px-2 py-0.5 text-center text-[10px] leading-tight text-ink shadow-sm outline-none ${extra}`}
+                    className={`pointer-events-auto ${side} ${width} line-clamp-4 border-2 border-ink bg-paper px-1.5 py-0.5 text-center text-[9px] leading-tight text-ink shadow-sm outline-none ${extra}`}
                   >
                     {d.texto}
                   </div>
                 );
-              })}
-            </div>
+              };
+              return (
+                <>
+                  <div className="pointer-events-none absolute inset-x-0 top-0 flex max-h-[40%] flex-col gap-1 overflow-hidden p-1.5">
+                    {top.map((d, di) => renderBalloon(d, di))}
+                  </div>
+                  {bottom.length > 0 && (
+                    <div className="pointer-events-none absolute inset-x-0 bottom-0 flex max-h-[35%] flex-col justify-end gap-1 overflow-hidden p-1.5">
+                      {bottom.map((d, di) => renderBalloon(d, di + top.length))}
+                    </div>
+                  )}
+                </>
+              );
+            })()}
           </div>
         );
       })}
