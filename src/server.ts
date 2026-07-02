@@ -128,17 +128,100 @@ function parseJsonLoose(raw: string): unknown {
   }
 }
 
+type Plan = "free" | "pro";
+
+// free → Gemini Flash (texto) + Pollinations (imagem, gratuito); pro → OpenAI GPT + gpt-image-1.
+async function getUserPlan(
+  supabase: ReturnType<typeof createClient<Database>>,
+  userId: string,
+): Promise<Plan> {
+  const { data } = await supabase
+    .from("profiles")
+    .select("plan")
+    .eq("id", userId)
+    .maybeSingle();
+  return (data as { plan?: string } | null)?.plan === "pro" ? "pro" : "free";
+}
+
+type TextResult = { text: string; model: string } | { error: string; status: number };
+
+async function callOpenAIText(env: unknown, prompt: string): Promise<TextResult> {
+  const openaiKey = readEnv(env, "OPENAI_API_KEY");
+  if (!openaiKey) return { error: "OPENAI_API_KEY nao configurada", status: 500 };
+  const model = readEnv(env, "OPENAI_MODEL") ?? "gpt-5.5";
+
+  const response = await fetch("https://api.openai.com/v1/responses", {
+    method: "POST",
+    headers: { authorization: `Bearer ${openaiKey}`, "content-type": "application/json" },
+    body: JSON.stringify({
+      model,
+      input: prompt,
+      text: { format: { type: "json_object" } },
+      max_output_tokens: 16000,
+    }),
+  });
+
+  const payload = await response.json().catch(() => null);
+  if (!response.ok) {
+    const message =
+      payload && typeof payload === "object" && "error" in payload
+        ? JSON.stringify((payload as { error: unknown }).error)
+        : "Erro ao chamar OpenAI";
+    return { error: message, status: 502 };
+  }
+  return { text: extractOpenAIText(payload), model };
+}
+
+async function callGeminiText(env: unknown, prompt: string): Promise<TextResult> {
+  const geminiKey = readEnv(env, "GEMINI_API_KEY");
+  if (!geminiKey) return { error: "GEMINI_API_KEY nao configurada", status: 500 };
+  const model = readEnv(env, "GEMINI_MODEL") ?? "gemini-2.5-flash";
+
+  const response = await fetch(
+    `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${geminiKey}`,
+    {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        contents: [{ parts: [{ text: prompt }] }],
+        generationConfig: { responseMimeType: "application/json", maxOutputTokens: 16000 },
+      }),
+    },
+  );
+
+  const payload = (await response.json().catch(() => null)) as {
+    candidates?: Array<{ content?: { parts?: Array<{ text?: string }> } }>;
+    error?: unknown;
+  } | null;
+  if (!response.ok) {
+    const message = payload?.error ? JSON.stringify(payload.error) : "Erro ao chamar Gemini";
+    return { error: message, status: 502 };
+  }
+  const text =
+    payload?.candidates?.[0]?.content?.parts?.map((p) => p.text ?? "").join("").trim() ?? "";
+  if (!text) return { error: "O Gemini nao retornou texto.", status: 502 };
+  return { text, model };
+}
+
+// Roteia a geração de texto pelo plano do usuário, com fallback para o outro provedor
+// quando a chave do provedor primário não está configurada.
+async function generateStructuredText(env: unknown, plan: Plan, prompt: string): Promise<TextResult> {
+  const hasOpenAI = Boolean(readEnv(env, "OPENAI_API_KEY"));
+  const hasGemini = Boolean(readEnv(env, "GEMINI_API_KEY"));
+  if (plan === "pro") {
+    return hasOpenAI ? callOpenAIText(env, prompt) : callGeminiText(env, prompt);
+  }
+  return hasGemini ? callGeminiText(env, prompt) : callOpenAIText(env, prompt);
+}
+
 async function createProjectBible(request: Request, env: unknown, projectId: string) {
   if (request.method !== "POST") return json({ error: "Metodo nao permitido" }, 405);
 
   const supabaseUrl = readEnv(env, "SUPABASE_URL");
   const supabaseKey = readEnv(env, "SUPABASE_PUBLISHABLE_KEY");
-  const openaiKey = readEnv(env, "OPENAI_API_KEY");
-  const model = readEnv(env, "OPENAI_MODEL") ?? "gpt-5.5";
   const token = extractBearerToken(request);
 
   if (!supabaseUrl || !supabaseKey) return json({ error: "Supabase nao configurado" }, 500);
-  if (!openaiKey) return json({ error: "OPENAI_API_KEY nao configurada" }, 500);
   if (!token) return json({ error: "Sessao ausente" }, 401);
 
   const supabase = createClient<Database>(supabaseUrl, supabaseKey, {
@@ -161,30 +244,11 @@ async function createProjectBible(request: Request, env: unknown, projectId: str
   if (projectError) return json({ error: projectError.message }, 500);
   if (!project) return json({ error: "Projeto nao encontrado" }, 404);
 
-  const openaiResponse = await fetch("https://api.openai.com/v1/responses", {
-    method: "POST",
-    headers: {
-      authorization: `Bearer ${openaiKey}`,
-      "content-type": "application/json",
-    },
-    body: JSON.stringify({
-      model,
-      input: buildBiblePrompt(project),
-      text: { format: { type: "json_object" } },
-      max_output_tokens: 16000,
-    }),
-  });
+  const plan = await getUserPlan(supabase, userData.user.id);
+  const generated = await generateStructuredText(env, plan, buildBiblePrompt(project));
+  if ("error" in generated) return json({ error: generated.error }, generated.status);
 
-  const openaiPayload = await openaiResponse.json().catch(() => null);
-  if (!openaiResponse.ok) {
-    const message =
-      openaiPayload && typeof openaiPayload === "object" && "error" in openaiPayload
-        ? JSON.stringify((openaiPayload as { error: unknown }).error)
-        : "Erro ao chamar OpenAI";
-    return json({ error: message }, 502);
-  }
-
-  const text = extractOpenAIText(openaiPayload);
+  const { text, model } = generated;
   let content: Json;
   try {
     content = parseJsonLoose(text) as Json;
@@ -272,12 +336,9 @@ async function createProjectCharacters(request: Request, env: unknown, projectId
 
   const supabaseUrl = readEnv(env, "SUPABASE_URL");
   const supabaseKey = readEnv(env, "SUPABASE_PUBLISHABLE_KEY");
-  const openaiKey = readEnv(env, "OPENAI_API_KEY");
-  const model = readEnv(env, "OPENAI_MODEL") ?? "gpt-5.5";
   const token = extractBearerToken(request);
 
   if (!supabaseUrl || !supabaseKey) return json({ error: "Supabase nao configurado" }, 500);
-  if (!openaiKey) return json({ error: "OPENAI_API_KEY nao configurada" }, 500);
   if (!token) return json({ error: "Sessao ausente" }, 401);
 
   const supabase = createClient<Database>(supabaseUrl, supabaseKey, {
@@ -308,30 +369,15 @@ async function createProjectCharacters(request: Request, env: unknown, projectId
 
   if (!bibleRow) return json({ error: "Gere o planejamento da obra antes dos personagens." }, 400);
 
-  const openaiResponse = await fetch("https://api.openai.com/v1/responses", {
-    method: "POST",
-    headers: {
-      authorization: `Bearer ${openaiKey}`,
-      "content-type": "application/json",
-    },
-    body: JSON.stringify({
-      model,
-      input: buildCharactersPrompt(project, bibleRow.content),
-      text: { format: { type: "json_object" } },
-      max_output_tokens: 16000,
-    }),
-  });
+  const plan = await getUserPlan(supabase, userData.user.id);
+  const generated = await generateStructuredText(
+    env,
+    plan,
+    buildCharactersPrompt(project, bibleRow.content),
+  );
+  if ("error" in generated) return json({ error: generated.error }, generated.status);
 
-  const openaiPayload = await openaiResponse.json().catch(() => null);
-  if (!openaiResponse.ok) {
-    const message =
-      openaiPayload && typeof openaiPayload === "object" && "error" in openaiPayload
-        ? JSON.stringify((openaiPayload as { error: unknown }).error)
-        : "Erro ao chamar OpenAI";
-    return json({ error: message }, 502);
-  }
-
-  const text = extractOpenAIText(openaiPayload);
+  const { text } = generated;
   let list: GeneratedCharacter[] = [];
   try {
     const parsed = parseJsonLoose(text) as { personagens?: GeneratedCharacter[] } | GeneratedCharacter[];
@@ -446,12 +492,9 @@ async function createProjectScript(request: Request, env: unknown, projectId: st
 
   const supabaseUrl = readEnv(env, "SUPABASE_URL");
   const supabaseKey = readEnv(env, "SUPABASE_PUBLISHABLE_KEY");
-  const openaiKey = readEnv(env, "OPENAI_API_KEY");
-  const model = readEnv(env, "OPENAI_MODEL") ?? "gpt-5.5";
   const token = extractBearerToken(request);
 
   if (!supabaseUrl || !supabaseKey) return json({ error: "Supabase nao configurado" }, 500);
-  if (!openaiKey) return json({ error: "OPENAI_API_KEY nao configurada" }, 500);
   if (!token) return json({ error: "Sessao ausente" }, 401);
 
   const supabase = createClient<Database>(supabaseUrl, supabaseKey, {
@@ -488,30 +531,15 @@ async function createProjectScript(request: Request, env: unknown, projectId: st
     .eq("project_id", project.id)
     .order("sort_order", { ascending: true });
 
-  const openaiResponse = await fetch("https://api.openai.com/v1/responses", {
-    method: "POST",
-    headers: {
-      authorization: `Bearer ${openaiKey}`,
-      "content-type": "application/json",
-    },
-    body: JSON.stringify({
-      model,
-      input: buildScriptPrompt(project, bibleRow.content, (characters ?? []) as CharacterForScript[]),
-      text: { format: { type: "json_object" } },
-      max_output_tokens: 16000,
-    }),
-  });
+  const plan = await getUserPlan(supabase, userData.user.id);
+  const generated = await generateStructuredText(
+    env,
+    plan,
+    buildScriptPrompt(project, bibleRow.content, (characters ?? []) as CharacterForScript[]),
+  );
+  if ("error" in generated) return json({ error: generated.error }, generated.status);
 
-  const openaiPayload = await openaiResponse.json().catch(() => null);
-  if (!openaiResponse.ok) {
-    const message =
-      openaiPayload && typeof openaiPayload === "object" && "error" in openaiPayload
-        ? JSON.stringify((openaiPayload as { error: unknown }).error)
-        : "Erro ao chamar OpenAI";
-    return json({ error: message }, 502);
-  }
-
-  const text = extractOpenAIText(openaiPayload);
+  const { text, model } = generated;
   let script: {
     titulo?: string;
     objetivo?: string;
@@ -615,17 +643,24 @@ function buildPanelImagePrompt(
     })
     .join("\n");
 
+  const framing = panel.framing?.trim() || "plano medio";
+  const isClose = /close|primeiro plano|detalhe/i.test(framing);
+
   return [
-    "Crie um quadro original de manga.",
+    "Crie um quadro original de manga mostrando uma CENA COMPLETA (personagens DENTRO de um ambiente), nunca apenas um retrato ou rosto isolado.",
     `MODO: ${colorModeLabel(project.color_mode)}.`,
     project.genre ? `GENERO: ${project.genre}.` : "",
     project.style_preset ? `ESTILO: ${project.style_preset}.` : "",
-    panel.framing ? `ENQUADRAMENTO: ${panel.framing}.` : "",
+    panel.scene_description ? `CENA (acao acontecendo): ${panel.scene_description}.` : "",
+    `CENARIO/FUNDO (OBRIGATORIO): desenhe o ambiente completo da cena — arquitetura, objetos, natureza, iluminacao, profundidade e perspectiva. O fundo deve preencher TODO o quadro; jamais deixe fundo branco/vazio atras dos personagens.`,
+    `ENQUADRAMENTO: ${framing}. Respeite: plano geral/aberto = personagens de corpo inteiro pequenos dentro do cenario; plano medio = personagens da cintura para cima COM o cenario visivel e detalhado ao fundo; close = rosto/detalhe, mas ainda com elementos do ambiente ao fundo.`,
+    isClose
+      ? ""
+      : "IMPORTANTE: NAO enquadre apenas o rosto. Mostre corpo (inteiro ou da cintura para cima) e o ambiente ao redor.",
     panel.camera ? `CAMERA: ${panel.camera}.` : "",
     present ? `PERSONAGENS (mantenha identidade EXATA):\n${present}` : "",
-    panel.scene_description ? `CENA: ${panel.scene_description}.` : "",
-    "ESTILO VISUAL: composicao dramatica de manga, linhas de movimento quando fizer sentido.",
-    "COMPOSICAO: deixe area VAZIA (ceu, parede, fundo neutro) no topo e/ou nos cantos superiores para encaixar baloes de fala depois. NAO coloque rostos colados no topo do quadro; posicione o(s) personagem(ns) mais para o centro/baixo, deixando respiro no topo.",
+    "ESTILO VISUAL: composicao dramatica de manga, linhas de movimento quando fizer sentido, screentones/hachuras no cenario.",
+    "COMPOSICAO: deixe area de respiro (ceu, parede, fundo) no topo e/ou nos cantos superiores para encaixar baloes de fala depois; posicione o(s) personagem(ns) mais para o centro/baixo.",
     "NAO ALTERAR: cabelo, olhos, roupas, cicatrizes, idade, proporcoes ou lado de ferimentos dos personagens.",
     "SEM TEXTOS, SEM BALOES E SEM LETRAS NA IMAGEM.",
   ]
@@ -652,6 +687,9 @@ function buildStoryboardPrompt(
     "Geometria: cada quadro tem { x, y, w, h } em fracoes de 0 a 1 da pagina; os quadros de uma pagina devem preencher a pagina sem sobrepor.",
     "Distribua os dialogos do roteiro entre os quadros correspondentes.",
     "",
+    "ENQUADRAMENTOS (obrigatorio variar): o primeiro quadro de cada cena/local deve ser plano geral (establishing shot) mostrando o ambiente. Use no MAXIMO 1 close por pagina; prefira plano geral, plano medio e plano americano. A descricao de cada quadro deve dizer a ACAO que acontece, nao apenas quem aparece.",
+    "CENARIO: todo quadro deve ter o campo 'cenario' descrevendo o ambiente/fundo visivel (local, objetos, iluminacao, clima, profundidade).",
+    "",
     "Estrutura JSON obrigatoria:",
     JSON.stringify({
       paginas: [
@@ -662,8 +700,9 @@ function buildStoryboardPrompt(
               numero: 1,
               reading_order: 1,
               geometry: { x: 0, y: 0, w: 1, h: 0.5 },
-              descricao: "descricao visual do quadro",
-              enquadramento: "plano medio | close | plano geral | ...",
+              descricao: "descricao visual da ACAO do quadro",
+              cenario: "ambiente/fundo visivel: local, objetos, iluminacao, profundidade",
+              enquadramento: "plano geral | plano medio | plano americano | close",
               camera: "angulo/altura da camera",
               personagens: ["nome"],
               dialogos: [{ tipo: "dialogo", personagem: "nome", texto: "string" }],
@@ -686,6 +725,7 @@ type AiPanel = {
   reading_order?: number;
   geometry?: { x?: number; y?: number; w?: number; h?: number };
   descricao?: string;
+  cenario?: string;
   enquadramento?: string;
   camera?: string;
   personagens?: string[];
@@ -698,12 +738,9 @@ async function createProjectStoryboard(request: Request, env: unknown, projectId
 
   const supabaseUrl = readEnv(env, "SUPABASE_URL");
   const supabaseKey = readEnv(env, "SUPABASE_PUBLISHABLE_KEY");
-  const openaiKey = readEnv(env, "OPENAI_API_KEY");
-  const model = readEnv(env, "OPENAI_MODEL") ?? "gpt-5.5";
   const token = extractBearerToken(request);
 
   if (!supabaseUrl || !supabaseKey) return json({ error: "Supabase nao configurado" }, 500);
-  if (!openaiKey) return json({ error: "OPENAI_API_KEY nao configurada" }, 500);
   if (!token) return json({ error: "Sessao ausente" }, 401);
 
   const supabase = createClient<Database>(supabaseUrl, supabaseKey, {
@@ -742,27 +779,15 @@ async function createProjectStoryboard(request: Request, env: unknown, projectId
     .order("sort_order", { ascending: true });
   const locks = (charRows ?? []) as CharacterLock[];
 
-  const openaiResponse = await fetch("https://api.openai.com/v1/responses", {
-    method: "POST",
-    headers: { authorization: `Bearer ${openaiKey}`, "content-type": "application/json" },
-    body: JSON.stringify({
-      model,
-      input: buildStoryboardPrompt(project, chapter.script, locks),
-      text: { format: { type: "json_object" } },
-      max_output_tokens: 16000,
-    }),
-  });
+  const plan = await getUserPlan(supabase, userData.user.id);
+  const generated = await generateStructuredText(
+    env,
+    plan,
+    buildStoryboardPrompt(project, chapter.script, locks),
+  );
+  if ("error" in generated) return json({ error: generated.error }, generated.status);
 
-  const openaiPayload = await openaiResponse.json().catch(() => null);
-  if (!openaiResponse.ok) {
-    const message =
-      openaiPayload && typeof openaiPayload === "object" && "error" in openaiPayload
-        ? JSON.stringify((openaiPayload as { error: unknown }).error)
-        : "Erro ao chamar OpenAI";
-    return json({ error: message }, 502);
-  }
-
-  const text = extractOpenAIText(openaiPayload);
+  const { text } = generated;
   let parsed: { paginas?: AiPage[] };
   try {
     parsed = parseJsonLoose(text) as { paginas?: AiPage[] };
@@ -796,6 +821,10 @@ async function createProjectStoryboard(request: Request, env: unknown, projectId
     const quadros = Array.isArray(aiPage.quadros) ? aiPage.quadros : [];
     const panelRows = quadros.map((q, qi) => {
       const g = q.geometry ?? {};
+      // Cenário entra na descrição para persistir no banco e alimentar o prompt de imagem.
+      const sceneWithSetting = [q.descricao, q.cenario ? `Cenario: ${q.cenario}` : null]
+        .filter(Boolean)
+        .join(". ");
       return {
         page_id: page.id,
         project_id: project.id,
@@ -808,7 +837,7 @@ async function createProjectStoryboard(request: Request, env: unknown, projectId
           w: typeof g.w === "number" ? g.w : 1,
           h: typeof g.h === "number" ? g.h : 1 / Math.max(quadros.length, 1),
         } as Json,
-        scene_description: q.descricao ?? null,
+        scene_description: sceneWithSetting || null,
         framing: q.enquadramento ?? null,
         camera: q.camera ?? null,
         characters: (q.personagens ?? []) as Json,
@@ -816,7 +845,7 @@ async function createProjectStoryboard(request: Request, env: unknown, projectId
         prompt: buildPanelImagePrompt(
           project,
           {
-            scene_description: q.descricao,
+            scene_description: sceneWithSetting,
             framing: q.enquadramento,
             camera: q.camera,
             characters: q.personagens,
@@ -859,50 +888,16 @@ function base64ToBytes(b64: string): Uint8Array {
   return bytes;
 }
 
-async function generatePanelImage(
-  request: Request,
+async function generateImageOpenAI(
   env: unknown,
-  projectId: string,
-  panelId: string,
-) {
-  if (request.method !== "POST") return json({ error: "Metodo nao permitido" }, 405);
-
-  const supabaseUrl = readEnv(env, "SUPABASE_URL");
-  const supabaseKey = readEnv(env, "SUPABASE_PUBLISHABLE_KEY");
+  prompt: string,
+  size: string,
+): Promise<Uint8Array | { error: string; status: number }> {
   const openaiKey = readEnv(env, "OPENAI_API_KEY");
+  if (!openaiKey) return { error: "OPENAI_API_KEY nao configurada", status: 500 };
   const imageModel = readEnv(env, "OPENAI_IMAGE_MODEL") ?? "gpt-image-1";
   // Qualidade economica por padrao (low). Suba via env OPENAI_IMAGE_QUALITY=medium|high.
   const imageQuality = readEnv(env, "OPENAI_IMAGE_QUALITY") ?? "low";
-  const token = extractBearerToken(request);
-
-  if (!supabaseUrl || !supabaseKey) return json({ error: "Supabase nao configurado" }, 500);
-  if (!openaiKey) return json({ error: "OPENAI_API_KEY nao configurada" }, 500);
-  if (!token) return json({ error: "Sessao ausente" }, 401);
-
-  const supabase = createClient<Database>(supabaseUrl, supabaseKey, {
-    global: { headers: { Authorization: `Bearer ${token}` } },
-    auth: { persistSession: false, autoRefreshToken: false },
-  });
-
-  const { data: userData, error: userError } = await supabase.auth.getUser(token);
-  if (userError || !userData.user) return json({ error: "Sessao invalida" }, 401);
-
-  const { data: panel, error: panelError } = await supabase
-    .from("panels")
-    .select("id,project_id,prompt,geometry")
-    .eq("id", panelId)
-    .eq("project_id", projectId)
-    .maybeSingle();
-
-  if (panelError) return json({ error: panelError.message }, 500);
-  if (!panel) return json({ error: "Quadro nao encontrado" }, 404);
-
-  const basePrompt = panel.prompt ?? "Quadro de manga em preto e branco, sem textos.";
-  // Reforca (mesmo para quadros criados antes) que deve sobrar espaco vazio para os baloes.
-  const prompt =
-    basePrompt +
-    "\nDEIXE ESPACO VAZIO no topo e nos cantos superiores para baloes; nao tape o rosto; sem textos ou baloes na imagem.";
-  const size = pickImageSize(panel.geometry);
 
   const imageResponse = await fetch("https://api.openai.com/v1/images/generations", {
     method: "POST",
@@ -916,24 +911,116 @@ async function generatePanelImage(
   } | null;
   if (!imageResponse.ok) {
     const message = imagePayload?.error ? JSON.stringify(imagePayload.error) : "Erro ao gerar imagem";
-    return json({ error: message }, 502);
+    return { error: message, status: 502 };
   }
 
   const first = imagePayload?.data?.[0];
-  let bytes: Uint8Array;
-  if (first?.b64_json) {
-    bytes = base64ToBytes(first.b64_json);
-  } else if (first?.url) {
+  if (first?.b64_json) return base64ToBytes(first.b64_json);
+  if (first?.url) {
     const fetched = await fetch(first.url);
-    bytes = new Uint8Array(await fetched.arrayBuffer());
-  } else {
-    return json({ error: "A OpenAI nao retornou imagem." }, 502);
+    return new Uint8Array(await fetched.arrayBuffer());
   }
+  return { error: "A OpenAI nao retornou imagem.", status: 502 };
+}
+
+// Geração gratuita (plano free) via Pollinations.ai — sem chave, modelo flux.
+async function generateImagePollinations(
+  prompt: string,
+  size: string,
+): Promise<Uint8Array | { error: string; status: number }> {
+  const [width, height] = size.split("x").map(Number);
+  const url =
+    `https://image.pollinations.ai/prompt/${encodeURIComponent(prompt)}` +
+    `?width=${width}&height=${height}&model=flux&nologo=true&enhance=false&seed=${Math.floor(Math.random() * 1e9)}`;
+
+  const response = await fetch(url);
+  if (!response.ok) {
+    return { error: `Erro ao gerar imagem gratuita (Pollinations ${response.status}). Tente novamente.`, status: 502 };
+  }
+  const bytes = new Uint8Array(await response.arrayBuffer());
+  if (bytes.length < 1024) return { error: "A geracao gratuita retornou imagem vazia. Tente novamente.", status: 502 };
+  return bytes;
+}
+
+async function generatePanelImage(
+  request: Request,
+  env: unknown,
+  projectId: string,
+  panelId: string,
+) {
+  if (request.method !== "POST") return json({ error: "Metodo nao permitido" }, 405);
+
+  const supabaseUrl = readEnv(env, "SUPABASE_URL");
+  const supabaseKey = readEnv(env, "SUPABASE_PUBLISHABLE_KEY");
+  const token = extractBearerToken(request);
+
+  if (!supabaseUrl || !supabaseKey) return json({ error: "Supabase nao configurado" }, 500);
+  if (!token) return json({ error: "Sessao ausente" }, 401);
+
+  const supabase = createClient<Database>(supabaseUrl, supabaseKey, {
+    global: { headers: { Authorization: `Bearer ${token}` } },
+    auth: { persistSession: false, autoRefreshToken: false },
+  });
+
+  const { data: userData, error: userError } = await supabase.auth.getUser(token);
+  if (userError || !userData.user) return json({ error: "Sessao invalida" }, 401);
+
+  const { data: panel, error: panelError } = await supabase
+    .from("panels")
+    .select("id,project_id,prompt,geometry,scene_description,framing,camera,characters")
+    .eq("id", panelId)
+    .eq("project_id", projectId)
+    .maybeSingle();
+
+  if (panelError) return json({ error: panelError.message }, 500);
+  if (!panel) return json({ error: "Quadro nao encontrado" }, 404);
+
+  const { data: project } = await supabase
+    .from("projects")
+    .select(
+      "id,user_id,title,description,creation_mode,initial_idea,genre,tone,age_rating,color_mode,reading_direction,page_format,dialogue_language,style_preset",
+    )
+    .eq("id", projectId)
+    .maybeSingle();
+
+  // Reconstrói o prompt na hora com as regras atuais de cena/cenário — assim quadros
+  // antigos (com prompt focado só no personagem) também passam a render a cena completa.
+  let prompt = panel.prompt ?? "Quadro de manga em preto e branco, sem textos.";
+  if (project && panel.scene_description) {
+    const { data: charRows } = await supabase
+      .from("characters")
+      .select("name,appearance,visual_lock")
+      .eq("project_id", projectId)
+      .order("sort_order", { ascending: true });
+    prompt = buildPanelImagePrompt(
+      project as ProjectForBible & { style_preset?: string | null },
+      {
+        scene_description: panel.scene_description,
+        framing: panel.framing,
+        camera: panel.camera,
+        characters: (panel.characters ?? []) as string[],
+      },
+      (charRows ?? []) as CharacterLock[],
+    );
+  }
+  prompt +=
+    "\nDEIXE ESPACO VAZIO no topo e nos cantos superiores para baloes; nao tape o rosto; sem textos ou baloes na imagem.";
+  const size = pickImageSize(panel.geometry);
+
+  const plan = await getUserPlan(supabase, userData.user.id);
+  const result =
+    plan === "pro"
+      ? await generateImageOpenAI(env, prompt, size)
+      : await generateImagePollinations(prompt, size);
+  if (!(result instanceof Uint8Array)) return json({ error: result.error }, result.status);
+  const bytes = result;
 
   const path = `${userData.user.id}/${projectId}/${panelId}.png`;
+  // Pollinations devolve JPEG; OpenAI devolve PNG — detecta pelo magic number.
+  const contentType = bytes[0] === 0xff && bytes[1] === 0xd8 ? "image/jpeg" : "image/png";
   const { error: uploadError } = await supabase.storage
     .from("manga-assets")
-    .upload(path, bytes, { contentType: "image/png", upsert: true });
+    .upload(path, bytes, { contentType, upsert: true });
   if (uploadError) return json({ error: uploadError.message }, 500);
 
   const { data: publicUrl } = supabase.storage.from("manga-assets").getPublicUrl(path);
